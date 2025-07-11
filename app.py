@@ -1,13 +1,15 @@
 import streamlit as st
-from compare import load_files, validate_po_number, compare_lines, format_report
+from compare import load_pdf, validate_po_number, compare_lines, format_report
 
 st.title("Rosemount OA–PO Checker")
 
-po_file = st.file_uploader("Upload PO CSV", type="csv")
-oa_file = st.file_uploader("Upload OA CSV", type="csv")
+po_file = st.file_uploader("Upload PO PDF", type="pdf")
+oa_file = st.file_uploader("Upload OA PDF", type="pdf")
 
 if po_file and oa_file:
-    po_df, oa_df = load_files(po_file, oa_file)
+    po_df = load_pdf(po_file, is_po=True)
+    oa_df = load_pdf(oa_file, is_po=False)
+
     valid, po_number = validate_po_number(po_df, oa_df)
 
     if not valid:
