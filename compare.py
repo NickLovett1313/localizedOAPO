@@ -17,6 +17,7 @@ def compare_lines(po_df, oa_df):
     discrepancies = []
     weird_flags = []
 
+    # For each unique line number in PO:
     for line in po_df['Line No.'].unique():
         po_line = po_df[po_df['Line No.'] == line]
         oa_line = oa_df[oa_df['Cust Line No'] == line]
@@ -25,18 +26,21 @@ def compare_lines(po_df, oa_df):
             discrepancies.append(f"Line {line} in PO not found in OA.")
             continue
 
+        # Qty check (sum up in case of duplicates)
         po_qty = po_line['Qty'].sum()
         oa_qty = oa_line['Qty'].sum()
         if po_qty != oa_qty:
             discrepancies.append(f"Qty mismatch for Line {line}: PO={po_qty}, OA={oa_qty}")
 
+        # Model # check
         po_model = po_line['Description'].iloc[0]
         oa_model = oa_line['Description'].iloc[0]
         if po_model != oa_model:
             diff = list(difflib.ndiff(po_model, oa_model))
-            discrepancies.append(f"Model # mismatch for Line {line}:
-" + '\n'.join(diff))
+            diff_text = '\n'.join(diff)
+            discrepancies.append(f"Model # mismatch for Line {line}:\n{diff_text}")
 
+    # Look for extra lines in OA
     for line in oa_df['Cust Line No'].unique():
         if line not in po_df['Line No.'].values:
             discrepancies.append(f"OA has extra line: {line}")
@@ -45,8 +49,14 @@ def compare_lines(po_df, oa_df):
 
 def format_report(po_number, discrepancies, weird_flags):
     report = f"Here are the discrepancies found for this OA (PO# {po_number})\n\n"
-    for idx, item in enumerate(discrepancies, 1):
-        report += f"{idx}. {item}\n\n"
-    for flag in weird_flags:
-        report += f"⚠️ {flag}\n"
+    if discrepancies:
+        for idx, item in enumerate(discrepancies, 1):
+            report += f"{idx}. {item}\n\n"
+    else:
+        report += "✅ No discrepancies found!\n"
+
+    if weird_flags:
+        for flag in weird_flags:
+            report += f"⚠️ {flag}\n"
+
     return report
