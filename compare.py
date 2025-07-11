@@ -1,31 +1,33 @@
 import fitz  # PyMuPDF
 import pandas as pd
+import difflib
 
 def load_pdf(uploaded_file, is_po=True):
-    # Load PDF with PyMuPDF
+    # Open PDF with PyMuPDF
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
     text = ""
     for page in doc:
         text += page.get_text()
 
-    # Split text lines
+    # Split text into lines
     lines = text.split('\n')
 
-    # Extract line-items
     extracted = []
     for idx, line in enumerate(lines):
         parts = line.strip().split()
         if len(parts) >= 5 and parts[0].isdigit():
-            # Example: 00010 702DX... Jul 8, 2025 3 EA 2,205.33 6,615.99
-            line_no = parts[0]
-            model = parts[1]
-            ship_date = parts[2] + " " + parts[3] + " " + parts[4] if ',' in parts[3] else parts[2]
-            qty = parts[-4]
-            unit_price = parts[-2].replace(',', '')
-            total_price = parts[-1].replace(',', '')
-            extracted.append([line_no, model, ship_date, qty, unit_price, total_price])
+            try:
+                # Example: 00010 702DX... Jul 8, 2025 3 EA 2,205.33 6,615.99
+                line_no = parts[0]
+                model = parts[1]
+                ship_date = " ".join(parts[2:5]) if ',' in parts[3] else parts[2]
+                qty = parts[-4]
+                unit_price = parts[-2].replace(',', '')
+                total_price = parts[-1].replace(',', '')
+                extracted.append([line_no, model, ship_date, qty, unit_price, total_price])
+            except:
+                pass  # skip lines that break
 
-    # Convert to DataFrame
     if is_po:
         df = pd.DataFrame(extracted, columns=['Line No.', 'Description', 'Requested Ship Date', 'Qty', 'Unit Price', 'Extended Price'])
         df['PURCHASE ORDER #'] = get_po_number(lines)
@@ -60,17 +62,26 @@ def compare_lines(po_df, oa_df):
             discrepancies.append(f"Line {line} in PO not found in OA.")
             continue
 
-        po_qty = po_line['Qty'].astype(int).sum()
-        oa_qty = oa_line['Qty'].astype(int).sum()
-        if po_qty != oa_qty:
+        # ✅ Safe qty check
+        po_qtys = pd.to_numeric(po_line['Qty'], errors='coerce')
+        oa_qtys = pd.to_numeric(oa_line['Qty'], errors='coerce')
+        po_qty = po_qtys.sum()
+        oa_qty = oa_qtys.sum()
+
+        if pd.isna(po_qty) or pd.isna(oa_qty):
+            discrepancies.append(f"⚠️ Weird Issue: Non-numeric Qty for Line {line} — check manually")
+        elif po_qty != oa_qty:
             discrepancies.append(f"Qty mismatch for Line {line}: PO={po_qty}, OA={oa_qty}")
 
+        # ✅ Model #
         po_model = po_line['Description'].iloc[0]
         oa_model = oa_line['Description'].iloc[0]
         if po_model != oa_model:
             diff = list(difflib.ndiff(po_model, oa_model))
-            discrepancies.append(f"Model # mismatch for Line {line}:\n" + '\n'.join(diff))
+            diff_text = '\n'.join(diff)
+            discrepancies.append(f"Model # mismatch for Line {line}:\n{diff_text}")
 
+    # ✅ Extra lines in OA
     for line in oa_df['Cust Line No'].unique():
         if line not in po_df['Line No.'].values:
             discrepancies.append(f"OA has extra line: {line}")
