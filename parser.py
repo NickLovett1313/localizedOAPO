@@ -9,7 +9,6 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Stop after Order total ($USD)
     stop_match = re.search(r'Order total.*?\$?USD?\s+([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1)
@@ -30,7 +29,7 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
-        # ✅ Smart Tag parsing
+        # ✅ Smart tag filter
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
@@ -39,9 +38,17 @@ def parse_po(file):
             has_letters = re.search(r'[A-Z]', t)
             has_digits = re.search(r'\d', t)
             is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
-            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits:
+            is_date = (
+                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t) or
+                re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t) or
+                re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
+            )
+            is_reasonable_len = 5 <= len(t) <= 30
+
+            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and is_reasonable_len:
                 tags.append(t)
-        tags = list(set(tags))  # Remove duplicates
+
+        tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
         data.append({
@@ -101,7 +108,7 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        # ✅ Smart Tag parsing for OA
+        # ✅ Smart tag filter
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
@@ -110,8 +117,16 @@ def parse_oa(file):
             has_letters = re.search(r'[A-Z]', t)
             has_digits = re.search(r'\d', t)
             is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
-            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits:
+            is_date = (
+                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t) or
+                re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t) or
+                re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
+            )
+            is_reasonable_len = 5 <= len(t) <= 30
+
+            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and is_reasonable_len:
                 tags.append(t)
+
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
