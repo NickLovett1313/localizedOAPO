@@ -163,16 +163,18 @@ def parse_oa(file):
         def is_valid_tag(candidate):
             if not candidate:
                 return False
+            tag_pattern = re.compile(r'^[A-Z]{2,3}-[A-Z0-9\-]{2,}$')
+            if not tag_pattern.match(candidate):
+                return False
             has_letters = re.search(r'[A-Z]', candidate)
             has_digits = re.search(r'\d', candidate)
             has_dash = '-' in candidate
-            is_not_date = not re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', candidate)
             is_reasonable_len = 4 <= len(candidate) <= 30
-            return has_letters and has_digits and has_dash and is_not_date and is_reasonable_len
+            is_not_date = not re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', candidate)
+            return has_letters and has_digits and has_dash and is_reasonable_len and is_not_date
 
         candidate = ''
 
-        # Check PERM block
         if perm_idx is not None:
             for offset in range(1, 4):
                 if perm_idx + offset < len(lines):
@@ -181,7 +183,6 @@ def parse_oa(file):
                         candidate = possible
                         break
 
-        # If no valid tag from PERM, try NAME block
         if not candidate and name_idx is not None:
             for offset in range(1, 4):
                 if name_idx + offset < len(lines):
@@ -190,7 +191,6 @@ def parse_oa(file):
                         candidate = possible
                         break
 
-        # Fallback: scan whole block for any valid tag
         if not candidate:
             for l in lines:
                 possible = l.strip()
