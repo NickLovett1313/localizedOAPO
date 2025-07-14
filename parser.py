@@ -15,7 +15,6 @@ def parse_po(file):
         order_total = stop_match.group(1)
         text = text.split(stop_match.group(0))[0]
 
-    # Split lines by 00010, 00020, etc.
     blocks = re.split(r'\n(0{3,}\d{2})', text)
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
@@ -31,12 +30,18 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
-        # Tags: match only real hardware tag strings with dashes
+        # ✅ Smart Tag parsing
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
-            if model and t != model.group(1) and 'ROSEMOUNT' not in t and 'EMERSON' not in t:
+            is_model = model and t == model.group(1)
+            is_cve = 'CVE' in t or 'TSE' in t
+            has_letters = re.search(r'[A-Z]', t)
+            has_digits = re.search(r'\d', t)
+            is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
+            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits:
                 tags.append(t)
+        tags = list(set(tags))  # Remove duplicates
         has_tag = 'Y' if tags else 'N'
 
         data.append({
@@ -62,13 +67,11 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Stop after Total (USD)
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1)
         text = text.split(stop_match.group(0))[0]
 
-    # Split lines by 00010 or 2.1 style line numbers
     blocks = re.split(r'\n(000\d{2}|\d+\.\d+)', text)
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
@@ -98,12 +101,18 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        # Tags: match real tags with dashes, skip address junk
+        # ✅ Smart Tag parsing for OA
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
-            if model and t != model.group(1) and 'ROSEMOUNT' not in t and 'EMERSON' not in t:
+            is_model = model and t == model.group(1)
+            is_cve = 'CVE' in t or 'TSE' in t
+            has_letters = re.search(r'[A-Z]', t)
+            has_digits = re.search(r'\d', t)
+            is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
+            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits:
                 tags.append(t)
+        tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
         data.append({
