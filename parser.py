@@ -51,18 +51,19 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data: only check if tags found
+        # ✅ Calib Data with units
         if has_tag == 'Y':
             calib_parts = []
             if '3-wire' in block or '3 wire' in block:
                 calib_parts.append('3-wire RTD')
             if '4-wire' in block or '4 wire' in block:
                 calib_parts.append('4-wire RTD')
-            range_match = re.findall(r'-?\d+\s*to\s*-?\d+', block)
-            if range_match:
-                calib_parts.extend(range_match)
-            if re.search(r'DEG|KPA|PSI|BAR', block, re.IGNORECASE):
-                calib_parts.append('Pressure/Temp Info')
+
+            range_units = re.findall(r'(-?\d+\s*to\s*-?\d+)\s*([A-Za-z° ]+)', block)
+            for r, u in range_units:
+                full_range = f"{r} {u.strip()}"
+                calib_parts.append(full_range)
+
             calib_data = 'Y' if calib_parts else 'N'
             calib_details = ", ".join(calib_parts)
         else:
@@ -150,18 +151,19 @@ def parse_oa(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data for OA: config + ranges
+        # ✅ Calib Data for OA with units
         if has_tag == 'Y':
             calib_parts = []
             if '13' in block:
                 calib_parts.append('3-wire RTD')
             if '14' in block:
                 calib_parts.append('4-wire RTD')
-            range_match = re.findall(r'-?\d+\s*to\s*-?\d+', block)
-            if range_match:
-                calib_parts.extend(range_match)
-            if re.search(r'DEG|KPA|PSI|BAR', block, re.IGNORECASE):
-                calib_parts.append('Pressure/Temp Info')
+
+            range_units = re.findall(r'(-?\d+\s*to\s*-?\d+)\s*([A-Za-z° ]+)', block)
+            for r, u in range_units:
+                full_range = f"{r} {u.strip()}"
+                calib_parts.append(full_range)
+
             calib_data = 'Y' if calib_parts else 'N'
             calib_details = ", ".join(calib_parts)
         else:
