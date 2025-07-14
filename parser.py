@@ -9,7 +9,7 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # ✅ FIXED: more robust regex for PO: matches “Order Total ($USD)” or similar
+    # Robust: matches “Order Total ($USD)” or similar
     stop_match = re.search(r'Order Total.*?\$?\(?USD\)?\s*([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
@@ -84,7 +84,7 @@ def parse_po(file):
 
     df = pd.DataFrame(data)
 
-    # ✅ Always add PO ORDER TOTAL row if found
+    # ✅ Add ORDER TOTAL row
     if order_total:
         order_total_row = {
             'Line No': '',
@@ -99,6 +99,15 @@ def parse_po(file):
             'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
+
+    # ✅ Sort lines numerically, keep ORDER TOTAL last
+    df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
+    df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
+
+    df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
+    df_main = df_main.sort_values(by='Line No', ignore_index=True)
+
+    df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
 
@@ -204,7 +213,6 @@ def parse_oa(file):
 
     df = pd.DataFrame(data)
 
-    # ✅ Always add OA ORDER TOTAL row if found
     if order_total:
         order_total_row = {
             'Line No': '',
@@ -219,5 +227,14 @@ def parse_oa(file):
             'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
+
+    # ✅ Sort real lines, keep ORDER TOTAL last
+    df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
+    df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
+
+    df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
+    df_main = df_main.sort_values(by='Line No', ignore_index=True)
+
+    df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
