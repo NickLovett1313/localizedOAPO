@@ -9,10 +9,10 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # ✅ Extract order total
-    stop_match = re.search(r'Order total.*?\$?USD?\s+([\d,]+\.\d{2})', text, re.IGNORECASE)
+    # ✅ FIXED: more robust regex for PO: matches “Order Total ($USD)” or similar
+    stop_match = re.search(r'Order Total.*?\$?\(?USD\)?\s*([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
-        order_total = stop_match.group(1)
+        order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
     blocks = re.split(r'\n(0{3,}\d{2})', text)
@@ -30,7 +30,6 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
-        # ✅ Smart tag parsing
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
@@ -40,9 +39,9 @@ def parse_po(file):
             has_digits = re.search(r'\d', t)
             is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
             is_date = (
-                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t) or
-                re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t) or
-                re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
+                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
+                or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
+                or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
             )
             is_reasonable_len = 5 <= len(t) <= 30
 
@@ -52,7 +51,6 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data
         if has_tag == 'Y':
             calib_parts = []
             if '3-wire' in block or '3 wire' in block:
@@ -86,7 +84,7 @@ def parse_po(file):
 
     df = pd.DataFrame(data)
 
-    # ✅ Append ORDER TOTAL row for PO
+    # ✅ Always add PO ORDER TOTAL row if found
     if order_total:
         order_total_row = {
             'Line No': '',
@@ -112,10 +110,9 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # ✅ Extract order total
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
-        order_total = stop_match.group(1)
+        order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
     blocks = re.split(r'\n(000\d{2}|\d+\.\d+)', text)
@@ -147,7 +144,6 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        # ✅ Smart tag parsing
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
@@ -157,9 +153,9 @@ def parse_oa(file):
             has_digits = re.search(r'\d', t)
             is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
             is_date = (
-                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t) or
-                re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t) or
-                re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
+                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
+                or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
+                or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
             )
             is_reasonable_len = 5 <= len(t) <= 30
 
@@ -169,7 +165,6 @@ def parse_oa(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data
         if has_tag == 'Y':
             calib_parts = []
             if '13' in block:
@@ -209,7 +204,7 @@ def parse_oa(file):
 
     df = pd.DataFrame(data)
 
-    # ✅ Append ORDER TOTAL row for OA
+    # ✅ Always add OA ORDER TOTAL row if found
     if order_total:
         order_total_row = {
             'Line No': '',
