@@ -9,11 +9,13 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
+    # Stop after Order total ($USD)
     stop_match = re.search(r'Order total.*?\$?USD?\s+([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1)
         text = text.split(stop_match.group(0))[0]
 
+    # Split lines by 00010, 00020, etc.
     blocks = re.split(r'\n(0{3,}\d{2})', text)
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
@@ -29,6 +31,14 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
+        # Tag parsing
+        tags_found = re.findall(r'([A-Z0-9\-]{5,})', block)
+        tags = []
+        for t in tags_found:
+            if model and t != model.group(1):
+                tags.append(t)
+        has_tag = 'Y' if tags else 'N'
+
         data.append({
             'Line No': int(line_no) if line_no else '',
             'Model Number': model.group(1) if model else '',
@@ -36,6 +46,8 @@ def parse_po(file):
             'Qty': qty,
             'Unit Price': unit_price,
             'Total Price': total_price,
+            'Has Tag?': has_tag,
+            'Tags': ", ".join(tags) if tags else ''
         })
 
     df = pd.DataFrame(data)
@@ -50,11 +62,13 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
+    # Stop after Total (USD)
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1)
         text = text.split(stop_match.group(0))[0]
 
+    # Split lines by 00010, 2.1, 3.1, etc.
     blocks = re.split(r'\n(000\d{2}|\d+\.\d+)', text)
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
@@ -84,6 +98,14 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
+        # Tag parsing
+        tags_found = re.findall(r'([A-Z0-9\-]{5,})', block)
+        tags = []
+        for t in tags_found:
+            if model and t != model.group(1):
+                tags.append(t)
+        has_tag = 'Y' if tags else 'N'
+
         data.append({
             'Line No': line_no,
             'Model Number': model.group(1) if model else '',
@@ -91,9 +113,10 @@ def parse_oa(file):
             'Qty': qty,
             'Unit Price': unit_price,
             'Total Price': total_price,
+            'Has Tag?': has_tag,
+            'Tags': ", ".join(tags) if tags else ''
         })
 
     df = pd.DataFrame(data)
     df['Order Total'] = order_total
     return df
-
