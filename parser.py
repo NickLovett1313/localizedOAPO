@@ -9,7 +9,6 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Stop at Order total ($USD)
     stop_match = re.search(r'Order total.*?\$?USD?\s+([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1)
@@ -22,17 +21,21 @@ def parse_po(file):
 
         model = re.search(r'([A-Z0-9\-]{6,})', block)
         ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
-        qty = re.search(r'Qty\s*.*?(\d+)', block)
-        unit_price = re.search(r'Unit.*?([\d,]+\.\d{2})', block)
-        total_price = re.search(r'Extended.*?([\d,]+\.\d{2})', block)
+
+        qty, unit_price, total_price = '', '', ''
+        line_match = re.search(r'(\d+)\s+EA\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+        if line_match:
+            qty = line_match.group(1)
+            unit_price = line_match.group(2)
+            total_price = line_match.group(3)
 
         data.append({
             'Line No': int(line_no) if line_no else '',
             'Model Number': model.group(1) if model else '',
             'Ship Date': ship_date.group(1) if ship_date else '',
-            'Qty': qty.group(1) if qty else '',
-            'Unit Price': unit_price.group(1) if unit_price else '',
-            'Total Price': total_price.group(1) if total_price else '',
+            'Qty': qty,
+            'Unit Price': unit_price,
+            'Total Price': total_price,
         })
 
     df = pd.DataFrame(data)
@@ -47,8 +50,7 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Stop at Total (USD)
-    stop_match = re.search(r'Total.*?\(USD\)\s*:\s*([\d,]+\.\d{2})', text, re.IGNORECASE)
+    stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1)
         text = text.split(stop_match.group(0))[0]
@@ -72,17 +74,20 @@ def parse_oa(file):
         if not ship_date:
             ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
-        qty = re.search(r'\n(\d+)\s+[\d,]+\.\d{2}', block)
-        unit_price = re.search(r'Unit Price.*?USD.*?(\d+[\d,]*\.\d{2})', block, re.IGNORECASE)
-        total_price = re.search(r'Total Amount.*?USD.*?(\d+[\d,]*\.\d{2})', block, re.IGNORECASE)
+        qty, unit_price, total_price = '', '', ''
+        line_match = re.search(r'\n(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+        if line_match:
+            qty = line_match.group(1)
+            unit_price = line_match.group(2)
+            total_price = line_match.group(3)
 
         data.append({
             'Line No': line_no,
             'Model Number': model.group(1) if model else '',
             'Ship Date': ship_date.group(1) if ship_date else '',
-            'Qty': qty.group(1) if qty else '',
-            'Unit Price': unit_price.group(1) if unit_price else '',
-            'Total Price': total_price.group(1) if total_price else '',
+            'Qty': qty,
+            'Unit Price': unit_price,
+            'Total Price': total_price,
         })
 
     df = pd.DataFrame(data)
