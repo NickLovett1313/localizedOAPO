@@ -4,8 +4,16 @@ import re
 
 def parse_po(file):
     data = []
+    order_total = ""
+
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
+
+    # Stop at Order total ($USD)
+    stop_match = re.search(r'Order total.*?\$?USD?\s+([\d,]+\.\d{2})', text, re.IGNORECASE)
+    if stop_match:
+        order_total = stop_match.group(1)
+        text = text.split(stop_match.group(0))[0]
 
     blocks = re.split(r'\n(0{3,}\d{2})', text)
     for i in range(1, len(blocks) - 1, 2):
@@ -14,7 +22,7 @@ def parse_po(file):
 
         model = re.search(r'([A-Z0-9\-]{6,})', block)
         ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
-        qty = re.search(r'(\d+) EA', block)
+        qty = re.search(r'Qty\s*.*?(\d+)', block)
         unit_price = re.search(r'Unit.*?([\d,]+\.\d{2})', block)
         total_price = re.search(r'Extended.*?([\d,]+\.\d{2})', block)
 
@@ -27,13 +35,23 @@ def parse_po(file):
             'Total Price': total_price.group(1) if total_price else '',
         })
 
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    df['Order Total'] = order_total
+    return df
 
 
 def parse_oa(file):
     data = []
+    order_total = ""
+
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
+
+    # Stop at Total (USD)
+    stop_match = re.search(r'Total.*?\(USD\)\s*:\s*([\d,]+\.\d{2})', text, re.IGNORECASE)
+    if stop_match:
+        order_total = stop_match.group(1)
+        text = text.split(stop_match.group(0))[0]
 
     blocks = re.split(r'\n(000\d{2}|\d+\.\d+)', text)
     for i in range(1, len(blocks) - 1, 2):
@@ -42,10 +60,7 @@ def parse_oa(file):
 
         if '.' in line_no:
             parts = line_no.split('.')
-            try:
-                line_no = int(parts[0]) * 10
-            except:
-                line_no = ''
+            line_no = int(parts[0]) * 10
         else:
             try:
                 line_no = int(line_no)
@@ -58,8 +73,8 @@ def parse_oa(file):
             ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
         qty = re.search(r'\n(\d+)\s+[\d,]+\.\d{2}', block)
-        unit_price = re.search(r'\n\d+\s+([\d,]+\.\d{2})', block)
-        total_price = re.search(r'\n\d+\s+[\d,]+\.\d{2}\s+([\d,]+\.\d{2})', block)
+        unit_price = re.search(r'Unit Price.*?USD.*?(\d+[\d,]*\.\d{2})', block, re.IGNORECASE)
+        total_price = re.search(r'Total Amount.*?USD.*?(\d+[\d,]*\.\d{2})', block, re.IGNORECASE)
 
         data.append({
             'Line No': line_no,
@@ -70,4 +85,6 @@ def parse_oa(file):
             'Total Price': total_price.group(1) if total_price else '',
         })
 
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    df['Order Total'] = order_total
+    return df
