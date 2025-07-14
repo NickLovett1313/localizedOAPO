@@ -1,47 +1,53 @@
-
 import pdfplumber
-import pandas as pd
 import re
+import pandas as pd
 
-def parse_pdf(file, doc_type='OA'):
-    """
-    Parse PO or OA PDF to extract key fields into a DataFrame.
-    """
-    lines_data = []
-
+def parse_po(file):
+    data = []
     with pdfplumber.open(file) as pdf:
-        text = ""
-        for page in pdf.pages:
-            text += page.extract_text() + "\n"
+        text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    po_number_pattern = r'PURCHASE ORDER #[:\s]*(\\S+)' if doc_type == 'PO' else r'Customer PO No[:\s]*(\\S+)'
-    po_number = re.search(po_number_pattern, text)
-    po_number = po_number.group(1) if po_number else "Not Found"
+    lines = re.split(r'\n0{3,}\d{2}', text)  # Split on 00010, 00020, etc.
+    for block in lines[1:]:
+        model = re.search(r'([A-Z0-9\-]{8,})', block)
+        ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
+        qty = re.search(r'(\d+) EA', block)
+        unit_price = re.search(r'Unit.*?([\d,]+\.\d{2})', block)
+        total_price = re.search(r'Extended.*?([\d,]+\.\d{2})', block)
+        tags = re.findall(r'(SR1-\S+)', block)
 
-    line_blocks = re.findall(r'(Line No\\.?[^L]*?)(?=Line No\\.|$)', text, re.DOTALL)
-
-    for block in line_blocks:
-        line_no = re.search(r'Line No\\.?\\s*(\\d+)', block)
-        cust_line_no = re.search(r'Cust Line No\\.?\\s*(\\d+)', block)
-        model = re.search(r'Description\\s*[:\\s]*(\\w[\\w\-]*)', block)
-        ship_date = re.search(r'(Requested Ship Date|Expected Ship Date)[:\\s]*(\\S+)', block)
-        qty = re.search(r'Qty[:\\s]*(\\d+)', block)
-        unit_price = re.search(r'(Unit Price|Unit Amount)[:\\s]*([\\d\\.]+)', block)
-        total_price = re.search(r'(Extended Price|Total Amount)[:\\s]*([\\d\\.]+)', block)
-        tags = re.findall(r'Tag[:\\s]*(\\S+)', block)
-        calibration = re.search(r'Calibration.*?(\\d+\\s*KPA)', block, re.IGNORECASE)
-
-        lines_data.append({
-            'PO Number': po_number,
-            'Line No': line_no.group(1) if line_no else (cust_line_no.group(1) if cust_line_no else ''),
+        data.append({
+            'Line No': '',  # Add if needed
             'Model Number': model.group(1) if model else '',
-            'Ship Date': ship_date.group(2) if ship_date else '',
+            'Ship Date': ship_date.group(1) if ship_date else '',
             'Qty': qty.group(1) if qty else '',
-            'Unit Price': unit_price.group(2) if unit_price else '',
-            'Total Price': total_price.group(2) if total_price else '',
-            'Tags': ', '.join(tags) if tags else '',
-            'Calibration Data': calibration.group(1) if calibration else ''
+            'Unit Price': unit_price.group(1) if unit_price else '',
+            'Total Price': total_price.group(1) if total_price else '',
+            'Tags': ", ".join(tags) if tags else ''
         })
+    return pd.DataFrame(data)
 
-    df = pd.DataFrame(lines_data)
-    return df
+def parse_oa(file):
+    data = []
+    with pdfplumber.open(file) as pdf:
+        text = "\n".join([p.extract_text() for p in pdf.pages])
+
+    lines = re.split(r'Cust Line No', text)
+    for block in lines[1:]:
+        model = re.search(r'([A-Z0-9\-]{8,})', block)
+        ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
+        qty = re.search(r'\n(\d+)\s+[\d,]+\.\d{2}', block)
+        unit_price = re.search(r'\n\d+\s+([\d,]+\.\d{2})', block)
+        total_price = re.search(r'\n\d+\s+[\d,]+\.\d{2}\s+([\d,]+\.\d{2})', block)
+        tags = re.findall(r'SR1-\S+', block)
+
+        data.append({
+            'Line No': '',  # Add if needed
+            'Model Number': model.group(1) if model else '',
+            'Ship Date': ship_date.group(1) if ship_date else '',
+            'Qty': qty.group(1) if qty else '',
+            'Unit Price': unit_price.group(1) if unit_price else '',
+            'Total Price': total_price.group(1) if total_price else '',
+            'Tags': ", ".join(tags) if tags else ''
+        })
+    return pd.DataFrame(data)
