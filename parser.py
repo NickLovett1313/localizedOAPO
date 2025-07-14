@@ -31,11 +31,11 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
-        # Tag parsing
-        tags_found = re.findall(r'([A-Z0-9\-]{5,})', block)
+        # Tags: match only real hardware tag strings with dashes
+        tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
-            if model and t != model.group(1):
+            if model and t != model.group(1) and 'ROSEMOUNT' not in t and 'EMERSON' not in t:
                 tags.append(t)
         has_tag = 'Y' if tags else 'N'
 
@@ -68,7 +68,7 @@ def parse_oa(file):
         order_total = stop_match.group(1)
         text = text.split(stop_match.group(0))[0]
 
-    # Split lines by 00010, 2.1, 3.1, etc.
+    # Split lines by 00010 or 2.1 style line numbers
     blocks = re.split(r'\n(000\d{2}|\d+\.\d+)', text)
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
@@ -98,11 +98,11 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        # Tag parsing
-        tags_found = re.findall(r'([A-Z0-9\-]{5,})', block)
+        # Tags: match real tags with dashes, skip address junk
+        tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
-            if model and t != model.group(1):
+            if model and t != model.group(1) and 'ROSEMOUNT' not in t and 'EMERSON' not in t:
                 tags.append(t)
         has_tag = 'Y' if tags else 'N'
 
