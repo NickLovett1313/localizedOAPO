@@ -62,7 +62,10 @@ def parse_oa(file):
 
         if '.' in line_no:
             parts = line_no.split('.')
-            line_no = int(parts[0]) * 10
+            try:
+                line_no = int(parts[0]) * 10
+            except:
+                line_no = ''
         else:
             try:
                 line_no = int(line_no)
@@ -75,11 +78,11 @@ def parse_oa(file):
             ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
         qty, unit_price, total_price = '', '', ''
-        line_match = re.search(r'\n(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+        line_match = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
         if line_match:
-            qty = line_match.group(1)
-            unit_price = line_match.group(2)
-            total_price = line_match.group(3)
+            qty = line_match.group(2)
+            unit_price = line_match.group(3)
+            total_price = line_match.group(4)
 
         data.append({
             'Line No': line_no,
@@ -93,3 +96,4 @@ def parse_oa(file):
     df = pd.DataFrame(data)
     df['Order Total'] = order_total
     return df
+
