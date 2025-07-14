@@ -29,7 +29,6 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
-        # ✅ Smart tag parsing
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
@@ -51,7 +50,6 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data with units
         if has_tag == 'Y':
             calib_parts = []
             if '3-wire' in block or '3 wire' in block:
@@ -84,7 +82,22 @@ def parse_po(file):
         })
 
     df = pd.DataFrame(data)
-    df['Order Total'] = order_total
+
+    # ✅ Append Order Total as final row
+    order_total_row = {
+        'Line No': '',
+        'Model Number': 'ORDER TOTAL',
+        'Ship Date': '',
+        'Qty': '',
+        'Unit Price': '',
+        'Total Price': order_total,
+        'Has Tag?': '',
+        'Tags': '',
+        'Calib Data?': '',
+        'Calib Details': ''
+    }
+    df = df.append(order_total_row, ignore_index=True)
+
     return df
 
 
@@ -129,7 +142,6 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        # ✅ Smart tag parsing
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
@@ -151,7 +163,6 @@ def parse_oa(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data with smart unit fix
         if has_tag == 'Y':
             calib_parts = []
             if '13' in block:
@@ -190,5 +201,20 @@ def parse_oa(file):
         })
 
     df = pd.DataFrame(data)
-    df['Order Total'] = order_total
+
+    # ✅ Append Order Total as final row
+    order_total_row = {
+        'Line No': '',
+        'Model Number': 'ORDER TOTAL',
+        'Ship Date': '',
+        'Qty': '',
+        'Unit Price': '',
+        'Total Price': order_total,
+        'Has Tag?': '',
+        'Tags': '',
+        'Calib Data?': '',
+        'Calib Details': ''
+    }
+    df = df.append(order_total_row, ignore_index=True)
+
     return df
