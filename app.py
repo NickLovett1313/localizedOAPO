@@ -7,13 +7,12 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Split and keep the line number using capture group
     blocks = re.split(r'\n(0{3,}\d{2})', text)
     for i in range(1, len(blocks), 2):
         line_no = blocks[i]
         block = blocks[i+1]
 
-        model = re.search(r'([A-Z0-9\-]{8,})', block)
+        model = re.search(r'([A-Z0-9\-]{6,})', block)
         ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
         qty = re.search(r'(\d+) EA', block)
         unit_price = re.search(r'Unit.*?([\d,]+\.\d{2})', block)
@@ -36,15 +35,24 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Use same splitting style as PO
-    blocks = re.split(r'(000\d{2})', text)
+    # Split on 00010 style or fallback to 5+ digit + space
+    blocks = re.split(r'\n(000\d{2}|\d+\.\d+)', text)
     for i in range(1, len(blocks), 2):
         line_no = blocks[i]
         block = blocks[i+1]
 
-        model = re.search(r'([A-Z0-9\-]{8,})', block)
+        # Normalize line number: 2.1 → 20, 3.1 → 30
+        if '.' in line_no:
+            parts = line_no.split('.')
+            line_no = int(parts[0]) * 10
+        else:
+            try:
+                line_no = int(line_no)
+            except:
+                line_no = ''
 
-        # Try both ship date formats
+        model = re.search(r'([A-Z0-9\-]{6,})', block)
+
         ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
         if not ship_date:
             ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
@@ -54,7 +62,7 @@ def parse_oa(file):
         total_price = re.search(r'\n\d+\s+[\d,]+\.\d{2}\s+([\d,]+\.\d{2})', block)
 
         data.append({
-            'Line No': int(line_no) if line_no else '',
+            'Line No': line_no,
             'Model Number': model.group(1) if model else '',
             'Ship Date': ship_date.group(1) if ship_date else '',
             'Qty': qty.group(1) if qty else '',
