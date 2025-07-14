@@ -151,7 +151,7 @@ def parse_oa(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data for OA with units
+        # ✅ Calib Data with smart unit filter
         if has_tag == 'Y':
             calib_parts = []
             if '13' in block:
@@ -161,8 +161,12 @@ def parse_oa(file):
 
             range_units = re.findall(r'(-?\d+\s*to\s*-?\d+)\s*([A-Za-z° ]+)', block)
             for r, u in range_units:
-                full_range = f"{r} {u.strip()}"
-                calib_parts.append(full_range)
+                unit_clean = u.strip().upper()
+                if re.search(r'(DEG|°|C|F|K|KPA|PSI|BAR|MBAR)', unit_clean):
+                    full_range = f"{r} {unit_clean}"
+                    calib_parts.append(full_range)
+                else:
+                    calib_parts.append(r)
 
             calib_data = 'Y' if calib_parts else 'N'
             calib_details = ", ".join(calib_parts)
