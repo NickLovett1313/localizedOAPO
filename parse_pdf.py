@@ -33,10 +33,19 @@ def parse_line_items(text):
     return items
 
 def build_dataframe(items, po_number, is_po=True):
+    if not items:
+        # If no matches, return an empty DataFrame with correct columns
+        if is_po:
+            cols = ['Line No.', 'Description', 'Requested Ship Date', 'Qty', 'Unit Price', 'Extended Price', 'PURCHASE ORDER #']
+        else:
+            cols = ['Cust Line No', 'Description', 'Expected Ship Date', 'Qty', 'Unit Price', 'Total Amount', 'Customer PO No']
+        return pd.DataFrame(columns=cols)
+    
     df = pd.DataFrame(items)
     df['Qty'] = pd.to_numeric(df['Qty'], errors='coerce')
     df['Unit Price'] = pd.to_numeric(df['Unit Price'], errors='coerce')
     df['Total Price'] = pd.to_numeric(df['Total Price'], errors='coerce')
+    
     if is_po:
         df.rename(columns={
             'Line': 'Line No.',
@@ -53,13 +62,8 @@ def build_dataframe(items, po_number, is_po=True):
             'Total Price': 'Total Amount'
         }, inplace=True)
         df['Customer PO No'] = po_number
+    
     return df
-
-def get_po_number(text):
-    match = re.search(r'PO Number\s+(\d+)', text)
-    if match:
-        return match.group(1)
-    return 'UNKNOWN'
 
 def parse_pdf(uploaded_file, is_po=True):
     text = extract_pdf_text(uploaded_file)
