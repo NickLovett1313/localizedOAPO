@@ -152,13 +152,10 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        perm_tag = ''
         wire_tag = ''
         perm_matches_wire = ''
 
         lines = block.split('\n')
-        perm_idx = next((i for i, line in enumerate(lines) if 'PERM' in line), None)
-        name_idx = next((i for i, line in enumerate(lines) if 'NAME' in line), None)
 
         def is_valid_tag(candidate):
             if not candidate:
@@ -173,32 +170,27 @@ def parse_oa(file):
             is_not_date = not re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', candidate)
             return has_letters and has_digits and has_dash and is_reasonable_len and is_not_date
 
-        candidate = ''
+        # ✅ Multi-tag scan
+        tags = []
+        for idx, line in enumerate(lines):
+            if 'PERM' in line or 'NAME' in line:
+                for offset in range(1, 4):
+                    if idx + offset < len(lines):
+                        possible = lines[idx + offset].strip()
+                        if is_valid_tag(possible):
+                            tags.append(possible)
 
-        if perm_idx is not None:
-            for offset in range(1, 4):
-                if perm_idx + offset < len(lines):
-                    possible = lines[perm_idx + offset].strip()
-                    if is_valid_tag(possible):
-                        candidate = possible
-                        break
-
-        if not candidate and name_idx is not None:
-            for offset in range(1, 4):
-                if name_idx + offset < len(lines):
-                    possible = lines[name_idx + offset].strip()
-                    if is_valid_tag(possible):
-                        candidate = possible
-                        break
-
-        if not candidate:
+        # Fallback: scan whole block
+        if not tags:
             for l in lines:
                 possible = l.strip()
                 if is_valid_tag(possible):
-                    candidate = possible
-                    break
+                    tags.append(possible)
 
-        perm_tag = candidate
+        tags = list(set(tags))
+        has_tag = 'Y' if tags else 'N'
+
+        perm_tag = tags[0] if tags else ''
 
         wire_match = re.search(r'WIRE\s*:\s*\n?([A-Z0-9\-]+)', block)
         if wire_match:
@@ -210,12 +202,6 @@ def parse_oa(file):
             perm_matches_wire = 'N'
         else:
             perm_matches_wire = ''
-
-        tags = []
-        if perm_tag:
-            tags.append(perm_tag)
-        tags = list(set(tags))
-        has_tag = 'Y' if tags else 'N'
 
         if has_tag == 'Y':
             calib_parts = []
@@ -242,7 +228,7 @@ def parse_oa(file):
             calib_details = ''
 
         data.append({
-            'Line No': line_no,
+            'Line No': int(line_no) if line_no else '',
             'Model Number': model.group(1) if model else '',
             'Ship Date': ship_date.group(1) if ship_date else '',
             'Qty': qty,
@@ -273,12 +259,17 @@ def parse_oa(file):
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
+    # ✅ Sort, separate tariff
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
 
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
 
-    df = pd.concat([df_main, df_total], ignore_index=True)
+    df_tariff = df_main[df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
+    df_main = df_main[~df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
+    df_tariff['Line No'] = ''
+
+    df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
 
     return df
