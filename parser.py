@@ -156,8 +156,9 @@ def parse_oa(file):
         wire_tag = ''
         perm_matches_wire = ''
 
-        perm_match = re.search(r'PERM\s*:\s*\n?([^\n]+)', block)
-        name_match = re.search(r'NAME\s*:\s*\n?([^\n]+)', block)
+        # ✅ Always grab the tag on the line BELOW PERM or NAME
+        perm_match = re.search(r'PERM\s*:\s*\n([^\n]+)', block)
+        name_match = re.search(r'NAME\s*:\s*\n([^\n]+)', block)
 
         raw_perm = perm_match.group(1).strip() if perm_match else ''
         raw_name = name_match.group(1).strip() if name_match else ''
