@@ -79,7 +79,7 @@ def parse_po(file):
             'Tags': ", ".join(tags) if tags else '',
             'Calib Data?': calib_data,
             'Calib Details': calib_details,
-            'PERM = WIRE?': ''  # PO side doesn't use this check
+            'PERM = WIRE?': ''
         })
 
     df = pd.DataFrame(data)
@@ -152,7 +152,6 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        # ✅ New: smart PERM/NAME fallback with strict check
         perm_tag = ''
         wire_tag = ''
         perm_matches_wire = ''
@@ -160,20 +159,25 @@ def parse_oa(file):
         perm_match = re.search(r'PERM\s*:\s*\n?([^\n]+)', block)
         name_match = re.search(r'NAME\s*:\s*\n?([^\n]+)', block)
 
-        candidate = ''
-        if perm_match:
-            candidate = perm_match.group(1).strip()
-        elif name_match:
-            candidate = name_match.group(1).strip()
+        raw_perm = perm_match.group(1).strip() if perm_match else ''
+        raw_name = name_match.group(1).strip() if name_match else ''
 
-        if candidate:
+        def is_valid_tag(candidate):
+            if not candidate:
+                return False
             has_letters = re.search(r'[A-Z]', candidate)
             has_digits = re.search(r'\d', candidate)
             has_dash = '-' in candidate
             is_not_date = not re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', candidate)
             is_reasonable_len = 4 <= len(candidate) <= 30
-            if has_letters and has_digits and has_dash and is_not_date and is_reasonable_len:
-                perm_tag = candidate
+            return has_letters and has_digits and has_dash and is_not_date and is_reasonable_len
+
+        if is_valid_tag(raw_perm):
+            perm_tag = raw_perm
+        elif is_valid_tag(raw_name):
+            perm_tag = raw_name
+        else:
+            perm_tag = ''
 
         wire_match = re.search(r'WIRE\s*:\s*\n?([A-Z0-9\-]+)', block)
         if wire_match:
