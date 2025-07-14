@@ -201,30 +201,37 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        if has_tag == 'Y':
-            calib_parts = []
-            block_lower = block.lower()
-            if re.search(r'\b3[-\s]?wire\b', block_lower):
-                calib_parts.append('3-wire RTD')
-            if re.search(r'\b4[-\s]?wire\b', block_lower):
-                calib_parts.append('4-wire RTD')
+        # ✅ Smart wire config near calibration range only
+        calib_parts = []
+        range_lines = []
+        for l in lines:
+            if re.search(r'-?\d+\s*to\s*-?\d+', l):
+                range_lines.append(l)
 
-            ranges = re.findall(r'-?\d+\s*to\s*-?\d+', block)
-            unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', block, re.IGNORECASE)
+        for l in range_lines:
+            ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
+            unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', l, re.IGNORECASE)
             unit_clean = unit_match.group(0).strip().upper() if unit_match else ""
-
             for r in ranges:
                 if unit_clean:
-                    full_range = f"{r} {unit_clean}"
+                    calib_parts.append(f"{r} {unit_clean}")
                 else:
-                    full_range = r
-                calib_parts.append(full_range)
+                    calib_parts.append(r)
 
-            calib_data = 'Y' if calib_parts else 'N'
-            calib_details = ", ".join(calib_parts)
-        else:
-            calib_data = 'N'
-            calib_details = ''
+        wire_config = ''
+        for l in range_lines:
+            if '12' in l:
+                wire_config = '2-wire RTD'
+            elif '13' in l:
+                wire_config = '3-wire RTD'
+            elif '14' in l:
+                wire_config = '4-wire RTD'
+
+        if wire_config:
+            calib_parts.insert(0, wire_config)
+
+        calib_data = 'Y' if calib_parts else 'N'
+        calib_details = ", ".join(calib_parts)
 
         data.append({
             'Line No': int(line_no) if line_no else '',
