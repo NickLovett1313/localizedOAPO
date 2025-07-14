@@ -9,7 +9,6 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Robust: matches “Order Total ($USD)” or similar
     stop_match = re.search(r'Order Total.*?\$?\(?USD\)?\s*([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
@@ -80,7 +79,7 @@ def parse_po(file):
             'Tags': ", ".join(tags) if tags else '',
             'Calib Data?': calib_data,
             'Calib Details': calib_details,
-            'PERM = WIRE?': ''  # PO doesn’t have this check
+            'PERM = WIRE?': ''  # PO side doesn’t use this check
         })
 
     df = pd.DataFrame(data)
@@ -153,7 +152,7 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        # ✅ New: PERM and WIRE tag check
+        # ✅ New: PERM/NAME + WIRE handling
         perm_tag = ''
         wire_tag = ''
         perm_matches_wire = ''
@@ -161,6 +160,10 @@ def parse_oa(file):
         perm_match = re.search(r'PERM\s*:\s*\n?([A-Z0-9\-]+)', block)
         if perm_match:
             perm_tag = perm_match.group(1).strip()
+        else:
+            name_match = re.search(r'NAME\s*:\s*\n?([A-Z0-9\-]+)', block)
+            if name_match:
+                perm_tag = name_match.group(1).strip()
 
         wire_match = re.search(r'WIRE\s*:\s*\n?([A-Z0-9\-]+)', block)
         if wire_match:
@@ -173,14 +176,12 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        # ✅ Only use PERM as Tags field
         tags = []
         if perm_tag:
             tags.append(perm_tag)
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data stays the same
         if has_tag == 'Y':
             calib_parts = []
             if '13' in block:
