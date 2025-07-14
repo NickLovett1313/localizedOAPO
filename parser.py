@@ -156,12 +156,9 @@ def parse_oa(file):
         wire_tag = ''
         perm_matches_wire = ''
 
-        # ✅ Always grab the tag on the line BELOW PERM or NAME
-        perm_match = re.search(r'PERM\s*:\s*\n([^\n]+)', block)
-        name_match = re.search(r'NAME\s*:\s*\n([^\n]+)', block)
-
-        raw_perm = perm_match.group(1).strip() if perm_match else ''
-        raw_name = name_match.group(1).strip() if name_match else ''
+        lines = block.split('\n')
+        perm_idx = next((i for i, line in enumerate(lines) if 'PERM' in line), None)
+        name_idx = next((i for i, line in enumerate(lines) if 'NAME' in line), None)
 
         def is_valid_tag(candidate):
             if not candidate:
@@ -173,12 +170,35 @@ def parse_oa(file):
             is_reasonable_len = 4 <= len(candidate) <= 30
             return has_letters and has_digits and has_dash and is_not_date and is_reasonable_len
 
-        if is_valid_tag(raw_perm):
-            perm_tag = raw_perm
-        elif is_valid_tag(raw_name):
-            perm_tag = raw_name
-        else:
-            perm_tag = ''
+        candidate = ''
+
+        # Check PERM block
+        if perm_idx is not None:
+            for offset in range(1, 4):
+                if perm_idx + offset < len(lines):
+                    possible = lines[perm_idx + offset].strip()
+                    if is_valid_tag(possible):
+                        candidate = possible
+                        break
+
+        # If no valid tag from PERM, try NAME block
+        if not candidate and name_idx is not None:
+            for offset in range(1, 4):
+                if name_idx + offset < len(lines):
+                    possible = lines[name_idx + offset].strip()
+                    if is_valid_tag(possible):
+                        candidate = possible
+                        break
+
+        # Fallback: scan whole block for any valid tag
+        if not candidate:
+            for l in lines:
+                possible = l.strip()
+                if is_valid_tag(possible):
+                    candidate = possible
+                    break
+
+        perm_tag = candidate
 
         wire_match = re.search(r'WIRE\s*:\s*\n?([A-Z0-9\-]+)', block)
         if wire_match:
