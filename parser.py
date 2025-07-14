@@ -1,25 +1,53 @@
-import streamlit as st
+# ✅ parser.py — DO NOT put any import of itself in here
+
+import pdfplumber
 import pandas as pd
-from parser import parse_po, parse_oa
+import re
 
-st.title("OA vs PO PDF Extractor")
+def parse_po(file):
+    data = []
+    with pdfplumber.open(file) as pdf:
+        text = "\n".join([p.extract_text() for p in pdf.pages])
 
-col1, col2 = st.columns(2)
+    lines = re.split(r'\n0{3,}\d{2}', text)  # Split on 00010, 00020, etc.
+    for block in lines[1:]:
+        model = re.search(r'([A-Z0-9\-]{8,})', block)
+        ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
+        qty = re.search(r'(\d+) EA', block)
+        unit_price = re.search(r'Unit.*?([\\d,]+\\.\\d{2})', block)
+        total_price = re.search(r'Extended.*?([\\d,]+\\.\\d{2})', block)
+        tags = re.findall(r'(SR1-\\S+)', block)
 
-with col1:
-    st.header("OA PDF")
-    oa_file = st.file_uploader("Upload OA PDF", type=['pdf'], key='oa')
-    if oa_file:
-        oa_df = parse_oa(oa_file)
-        st.dataframe(oa_df)
-        csv = oa_df.to_csv(index=False).encode('utf-8')
-        st.download_button("Download OA CSV", csv, "oa_extracted.csv", "text/csv")
+        data.append({
+            'Model Number': model.group(1) if model else '',
+            'Ship Date': ship_date.group(1) if ship_date else '',
+            'Qty': qty.group(1) if qty else '',
+            'Unit Price': unit_price.group(1) if unit_price else '',
+            'Total Price': total_price.group(1) if total_price else '',
+            'Tags': ", ".join(tags) if tags else ''
+        })
+    return pd.DataFrame(data)
 
-with col2:
-    st.header("PO PDF")
-    po_file = st.file_uploader("Upload PO PDF", type=['pdf'], key='po')
-    if po_file:
-        po_df = parse_po(po_file)
-        st.dataframe(po_df)
-        csv = po_df.to_csv(index=False).encode('utf-8')
-        st.download_button("Download PO CSV", csv, "po_extracted.csv", "text/csv")
+def parse_oa(file):
+    data = []
+    with pdfplumber.open(file) as pdf:
+        text = "\n".join([p.extract_text() for p in pdf.pages])
+
+    lines = re.split(r'Cust Line No', text)
+    for block in lines[1:]:
+        model = re.search(r'([A-Z0-9\-]{8,})', block)
+        ship_date = re.search(r'Expected Ship Date: (\\d{2}-[A-Za-z]{3}-\\d{4})', block)
+        qty = re.search(r'\\n(\\d+)\\s+[\\d,]+\\.\\d{2}', block)
+        unit_price = re.search(r'\\n\\d+\\s+([\\d,]+\\.\\d{2})', block)
+        total_price = re.search(r'\\n\\d+\\s+[\\d,]+\\.\\d{2}\\s+([\\d,]+\\.\\d{2})', block)
+        tags = re.findall(r'SR1-\\S+', block)
+
+        data.append({
+            'Model Number': model.group(1) if model else '',
+            'Ship Date': ship_date.group(1) if ship_date else '',
+            'Qty': qty.group(1) if qty else '',
+            'Unit Price': unit_price.group(1) if unit_price else '',
+            'Total Price': total_price.group(1) if total_price else '',
+            'Tags': ", ".join(tags) if tags else ''
+        })
+    return pd.DataFrame(data)
