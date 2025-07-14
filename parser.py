@@ -52,9 +52,10 @@ def parse_po(file):
 
         if has_tag == 'Y':
             calib_parts = []
-            if '3-wire' in block or '3 wire' in block:
+            block_lower = block.lower()
+            if re.search(r'\b3[-\s]?wire\b', block_lower):
                 calib_parts.append('3-wire RTD')
-            if '4-wire' in block or '4 wire' in block:
+            if re.search(r'\b4[-\s]?wire\b', block_lower):
                 calib_parts.append('4-wire RTD')
 
             range_units = re.findall(r'(-?\d+\s*to\s*-?\d+)\s*([A-Za-z° ]+)', block)
@@ -170,7 +171,6 @@ def parse_oa(file):
             is_not_date = not re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', candidate)
             return has_letters and has_digits and has_dash and is_reasonable_len and is_not_date
 
-        # ✅ Multi-tag scan
         tags = []
         for idx, line in enumerate(lines):
             if 'PERM' in line or 'NAME' in line:
@@ -180,7 +180,6 @@ def parse_oa(file):
                         if is_valid_tag(possible):
                             tags.append(possible)
 
-        # Fallback: scan whole block
         if not tags:
             for l in lines:
                 possible = l.strip()
@@ -189,7 +188,6 @@ def parse_oa(file):
 
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
-
         perm_tag = tags[0] if tags else ''
 
         wire_match = re.search(r'WIRE\s*:\s*\n?([A-Z0-9\-]+)', block)
@@ -205,9 +203,10 @@ def parse_oa(file):
 
         if has_tag == 'Y':
             calib_parts = []
-            if '13' in block:
+            block_lower = block.lower()
+            if re.search(r'\b3[-\s]?wire\b', block_lower):
                 calib_parts.append('3-wire RTD')
-            if '14' in block:
+            if re.search(r'\b4[-\s]?wire\b', block_lower):
                 calib_parts.append('4-wire RTD')
 
             ranges = re.findall(r'-?\d+\s*to\s*-?\d+', block)
@@ -259,7 +258,6 @@ def parse_oa(file):
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
-    # ✅ Sort, separate tariff
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
 
