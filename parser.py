@@ -9,6 +9,7 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
+    # ✅ Extract order total
     stop_match = re.search(r'Order total.*?\$?USD?\s+([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1)
@@ -51,7 +52,7 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data with units
+        # ✅ Calib Data
         if has_tag == 'Y':
             calib_parts = []
             if '3-wire' in block or '3 wire' in block:
@@ -85,7 +86,7 @@ def parse_po(file):
 
     df = pd.DataFrame(data)
 
-    # ✅ Add order total as final row
+    # ✅ Append ORDER TOTAL row for PO
     if order_total:
         order_total_row = {
             'Line No': '',
@@ -111,6 +112,7 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
+    # ✅ Extract order total
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1)
@@ -167,7 +169,7 @@ def parse_oa(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Calib Data with smart unit fix
+        # ✅ Calib Data
         if has_tag == 'Y':
             calib_parts = []
             if '13' in block:
@@ -207,7 +209,7 @@ def parse_oa(file):
 
     df = pd.DataFrame(data)
 
-    # ✅ Add order total as final row
+    # ✅ Append ORDER TOTAL row for OA
     if order_total:
         order_total_row = {
             'Line No': '',
