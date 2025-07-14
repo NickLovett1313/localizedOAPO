@@ -79,12 +79,12 @@ def parse_po(file):
             'Has Tag?': has_tag,
             'Tags': ", ".join(tags) if tags else '',
             'Calib Data?': calib_data,
-            'Calib Details': calib_details
+            'Calib Details': calib_details,
+            'PERM = WIRE?': ''  # PO doesn’t have this check
         })
 
     df = pd.DataFrame(data)
 
-    # ✅ Add ORDER TOTAL row
     if order_total:
         order_total_row = {
             'Line No': '',
@@ -96,11 +96,11 @@ def parse_po(file):
             'Has Tag?': '',
             'Tags': '',
             'Calib Data?': '',
-            'Calib Details': ''
+            'Calib Details': '',
+            'PERM = WIRE?': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
-    # ✅ Sort lines numerically, keep ORDER TOTAL last
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
 
@@ -153,27 +153,34 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
+        # ✅ New: PERM and WIRE tag check
+        perm_tag = ''
+        wire_tag = ''
+        perm_matches_wire = ''
+
+        perm_match = re.search(r'PERM\s*:\s*\n?([A-Z0-9\-]+)', block)
+        if perm_match:
+            perm_tag = perm_match.group(1).strip()
+
+        wire_match = re.search(r'WIRE\s*:\s*\n?([A-Z0-9\-]+)', block)
+        if wire_match:
+            wire_tag = wire_match.group(1).strip()
+
+        if perm_tag and wire_tag:
+            perm_matches_wire = 'Y' if perm_tag == wire_tag else 'N'
+        elif perm_tag or wire_tag:
+            perm_matches_wire = 'N'
+        else:
+            perm_matches_wire = ''
+
+        # ✅ Only use PERM as Tags field
         tags = []
-        for t in tags_found:
-            is_model = model and t == model.group(1)
-            is_cve = 'CVE' in t or 'TSE' in t
-            has_letters = re.search(r'[A-Z]', t)
-            has_digits = re.search(r'\d', t)
-            is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
-            is_date = (
-                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
-                or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
-                or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
-            )
-            is_reasonable_len = 5 <= len(t) <= 30
-
-            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and is_reasonable_len:
-                tags.append(t)
-
+        if perm_tag:
+            tags.append(perm_tag)
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
+        # ✅ Calib Data stays the same
         if has_tag == 'Y':
             calib_parts = []
             if '13' in block:
@@ -208,7 +215,8 @@ def parse_oa(file):
             'Has Tag?': has_tag,
             'Tags': ", ".join(tags) if tags else '',
             'Calib Data?': calib_data,
-            'Calib Details': calib_details
+            'Calib Details': calib_details,
+            'PERM = WIRE?': perm_matches_wire
         })
 
     df = pd.DataFrame(data)
@@ -224,11 +232,11 @@ def parse_oa(file):
             'Has Tag?': '',
             'Tags': '',
             'Calib Data?': '',
-            'Calib Details': ''
+            'Calib Details': '',
+            'PERM = WIRE?': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
-    # ✅ Sort real lines, keep ORDER TOTAL last
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
 
