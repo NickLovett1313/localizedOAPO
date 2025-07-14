@@ -8,7 +8,7 @@ def parse_po(file):
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
     blocks = re.split(r'\n(0{3,}\d{2})', text)
-    for i in range(1, len(blocks), 2):
+    for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
         block = blocks[i+1]
 
@@ -35,16 +35,17 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Split on 00010 style or fallback to 5+ digit + space
     blocks = re.split(r'\n(000\d{2}|\d+\.\d+)', text)
-    for i in range(1, len(blocks), 2):
+    for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
         block = blocks[i+1]
 
-        # Normalize line number: 2.1 → 20, 3.1 → 30
         if '.' in line_no:
             parts = line_no.split('.')
-            line_no = int(parts[0]) * 10
+            try:
+                line_no = int(parts[0]) * 10
+            except:
+                line_no = ''
         else:
             try:
                 line_no = int(line_no)
@@ -52,7 +53,6 @@ def parse_oa(file):
                 line_no = ''
 
         model = re.search(r'([A-Z0-9\-]{6,})', block)
-
         ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
         if not ship_date:
             ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
