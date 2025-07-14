@@ -29,7 +29,7 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
-        # ✅ Smart tag filter
+        # ✅ Smart tag parsing
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
@@ -51,6 +51,24 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
+        # ✅ Calib Data: only check if tags found
+        if has_tag == 'Y':
+            calib_parts = []
+            if '3-wire' in block or '3 wire' in block:
+                calib_parts.append('3-wire RTD')
+            if '4-wire' in block or '4 wire' in block:
+                calib_parts.append('4-wire RTD')
+            range_match = re.findall(r'-?\d+\s*to\s*-?\d+', block)
+            if range_match:
+                calib_parts.extend(range_match)
+            if re.search(r'DEG|KPA|PSI|BAR', block, re.IGNORECASE):
+                calib_parts.append('Pressure/Temp Info')
+            calib_data = 'Y' if calib_parts else 'N'
+            calib_details = ", ".join(calib_parts)
+        else:
+            calib_data = 'N'
+            calib_details = ''
+
         data.append({
             'Line No': int(line_no) if line_no else '',
             'Model Number': model.group(1) if model else '',
@@ -59,7 +77,9 @@ def parse_po(file):
             'Unit Price': unit_price,
             'Total Price': total_price,
             'Has Tag?': has_tag,
-            'Tags': ", ".join(tags) if tags else ''
+            'Tags': ", ".join(tags) if tags else '',
+            'Calib Data?': calib_data,
+            'Calib Details': calib_details
         })
 
     df = pd.DataFrame(data)
@@ -108,7 +128,7 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        # ✅ Smart tag filter
+        # ✅ Smart tag parsing
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
@@ -130,6 +150,24 @@ def parse_oa(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
+        # ✅ Calib Data for OA: config + ranges
+        if has_tag == 'Y':
+            calib_parts = []
+            if '13' in block:
+                calib_parts.append('3-wire RTD')
+            if '14' in block:
+                calib_parts.append('4-wire RTD')
+            range_match = re.findall(r'-?\d+\s*to\s*-?\d+', block)
+            if range_match:
+                calib_parts.extend(range_match)
+            if re.search(r'DEG|KPA|PSI|BAR', block, re.IGNORECASE):
+                calib_parts.append('Pressure/Temp Info')
+            calib_data = 'Y' if calib_parts else 'N'
+            calib_details = ", ".join(calib_parts)
+        else:
+            calib_data = 'N'
+            calib_details = ''
+
         data.append({
             'Line No': line_no,
             'Model Number': model.group(1) if model else '',
@@ -138,7 +176,9 @@ def parse_oa(file):
             'Unit Price': unit_price,
             'Total Price': total_price,
             'Has Tag?': has_tag,
-            'Tags': ", ".join(tags) if tags else ''
+            'Tags': ", ".join(tags) if tags else '',
+            'Calib Data?': calib_data,
+            'Calib Details': calib_details
         })
 
     df = pd.DataFrame(data)
