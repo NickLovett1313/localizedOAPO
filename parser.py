@@ -122,6 +122,7 @@ def parse_po(file):
 
     return df
 
+
 def parse_oa(file):
     data = []
     order_total = ""
@@ -169,13 +170,20 @@ def parse_oa(file):
         def is_valid_tag(candidate):
             if not candidate:
                 return False
+            # ✅ Special case: handle slash NC tags
+            if '/' in candidate:
+                parts = [p.strip() for p in candidate.split('/')]
+                if len(parts) == 2:
+                    pattern = re.compile(r'^[A-Z]{2,3}-[A-Z0-9\-]{2,}$')
+                    if pattern.match(parts[0]) and pattern.match(parts[1]):
+                        return True
             tag_pattern = re.compile(r'^[A-Z]{2,3}-[A-Z0-9\-]{2,}$')
             if not tag_pattern.match(candidate):
                 return False
             has_letters = re.search(r'[A-Z]', candidate)
             has_digits = re.search(r'\d', candidate)
             has_dash = '-' in candidate
-            is_reasonable_len = 4 <= len(candidate) <= 30
+            is_reasonable_len = 4 <= len(candidate) <= 50
             is_not_date = not re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', candidate)
             return has_letters and has_digits and has_dash and is_reasonable_len and is_not_date
 
