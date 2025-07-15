@@ -113,6 +113,10 @@ def parse_po(file):
 
 
 def parse_oa(file):
+    import pdfplumber
+    import pandas as pd
+    import re
+
     data = []
     order_total = ""
 
@@ -201,14 +205,15 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
+        # ✅ Stacked config logic
         calib_parts = []
         wire_config = ''
 
         for idx, l in enumerate(lines):
             if re.search(r'-?\d+\s*to\s*-?\d+', l):
                 ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
-                unit_clean = ""
 
+                unit_clean = ""
                 if idx + 1 < len(lines):
                     unit_line = lines[idx + 1].strip().upper()
                     unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
