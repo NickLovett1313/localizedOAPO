@@ -51,7 +51,7 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ NEW Multi-stack calib for PO — robust 'Range:' logic
+        # ✅ Improved PO Multi-stack calib: robust Range + wire + unit logic
         calib_parts = []
         wire_configs = []
 
@@ -62,7 +62,8 @@ def parse_po(file):
             if 'RANGE:' in l_upper:
                 parts = l.split('Range:')[-1].strip()
 
-                wire_match = re.search(r'([2-5])-WIRE', parts)
+                # Grab wire config if present
+                wire_match = re.search(r'([2-5])-WIRE', parts, re.IGNORECASE)
                 if wire_match:
                     wire_configs.append(f"{wire_match.group(1)}-wire RTD")
 
@@ -70,9 +71,14 @@ def parse_po(file):
                 parts_clean = re.sub(r'([2-5])-WIRE RTD[:\s]*', '', parts, flags=re.IGNORECASE)
                 parts_clean = re.sub(r'([2-5])-WIRE[:\s]*', '', parts_clean, flags=re.IGNORECASE)
 
+                # Example: '0 to 50 deg C'
                 range_match = re.search(r'-?\d+\s*to\s*-?\d+.*', parts_clean)
                 if range_match:
-                    calib_parts.append(range_match.group(0).strip().upper())
+                    value = range_match.group(0).strip()
+                    # Uppercase unit but keep 'to' lowercase
+                    value = re.sub(r'deg c', 'DEG C', value, flags=re.IGNORECASE)
+                    value = re.sub(r'kpag', 'KPAG', value, flags=re.IGNORECASE)
+                    calib_parts.append(value)
 
         wire_configs = list(set(wire_configs))
         if wire_configs:
