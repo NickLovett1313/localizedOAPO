@@ -51,7 +51,6 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Improved PO Multi-stack calib
         calib_parts = []
         wire_configs = []
 
@@ -61,6 +60,7 @@ def parse_po(file):
             l_upper = l.strip().upper()
             if 'RANGE:' in l_upper:
                 parts = l.split('Range:')[-1].strip()
+
                 wire_match = re.search(r'([2-5])-WIRE', parts, re.IGNORECASE)
                 if wire_match:
                     wire_configs.append(f"{wire_match.group(1)}-wire RTD")
@@ -91,7 +91,7 @@ def parse_po(file):
             'Total Price': total_price,
             'Has Tag?': has_tag,
             'Tags': ", ".join(tags) if tags else '',
-            'Wire-on Tag': '',   # ✅ PO: always blank for now
+            'Wire-on Tag': '',  # PO always blank
             'Calib Data?': calib_data,
             'Calib Details': calib_details
         })
@@ -116,14 +116,11 @@ def parse_po(file):
 
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
-
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
-
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
-
 
 def parse_oa(file):
     data = []
@@ -192,17 +189,15 @@ def parse_oa(file):
                         possible = lines[idx + offset].strip()
                         if is_valid_tag(possible):
                             tags.append(possible)
-                            # Now look for WIRE within this chunk
-                            wire_tag = ''
                             for j in range(idx + offset + 1, len(lines)):
                                 if 'WIRE' in lines[j].upper():
                                     if j + 1 < len(lines):
                                         candidate = lines[j + 1].strip()
                                         if is_valid_tag(candidate):
-                                            wire_tag = candidate
-                                            wire_on_tags.append(wire_tag)
-                                            break
+                                            wire_on_tags.append(candidate)
+                                        break
                                     break
+                            break
 
         if not tags:
             for l in lines:
@@ -212,6 +207,7 @@ def parse_oa(file):
 
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
+        wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
         calib_parts = []
         wire_configs = []
@@ -219,20 +215,17 @@ def parse_oa(file):
         for idx, l in enumerate(lines):
             if re.search(r'-?\d+\s*to\s*-?\d+', l):
                 ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
-
                 unit_clean = ""
                 if idx + 1 < len(lines):
                     unit_line = lines[idx + 1].strip().upper()
                     unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
                     if unit_match:
                         unit_clean = unit_match.group(0).strip().upper()
-
                 if idx + 2 < len(lines):
                     config_line = lines[idx + 2].strip()
                     if re.fullmatch(r'1[2-5]', config_line):
                         code = config_line[1]
                         wire_configs.append(f"{code}-wire RTD")
-
                 for r in ranges:
                     if unit_clean:
                         calib_parts.append(f"{r} {unit_clean}")
@@ -243,7 +236,6 @@ def parse_oa(file):
             wire_match = re.findall(r'\s1([2-5])\s', block)
             for m in wire_match:
                 wire_configs.append(f"{m}-wire RTD")
-
         wire_configs = list(set(wire_configs))
         if wire_configs:
             calib_parts = wire_configs + calib_parts
@@ -282,17 +274,12 @@ def parse_oa(file):
             'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
-
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
-
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
-
     df_tariff = df_main[df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     df_main = df_main[~df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     df_tariff['Line No'] = ''
-
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
-
     return df
