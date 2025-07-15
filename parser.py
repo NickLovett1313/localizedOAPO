@@ -201,7 +201,6 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        # ✅ Smart wire config near calibration range only
         calib_parts = []
         range_lines = []
         for l in lines:
@@ -220,12 +219,18 @@ def parse_oa(file):
 
         wire_config = ''
         for l in range_lines:
-            if '12' in l:
-                wire_config = '2-wire RTD'
-            elif '13' in l:
-                wire_config = '3-wire RTD'
-            elif '14' in l:
-                wire_config = '4-wire RTD'
+            idx = next((i for i, line in enumerate(lines) if l.strip() == line.strip()), None)
+            if idx is not None:
+                # Same line
+                if re.search(r'\b1[2-5]\b', lines[idx]):
+                    code = re.search(r'\b1([2-5])\b', lines[idx]).group(1)
+                    wire_config = f"{code}-wire RTD"
+                # Next line
+                elif idx + 1 < len(lines):
+                    next_line = lines[idx + 1].strip()
+                    if re.fullmatch(r'1[2-5]', next_line):
+                        code = next_line[1]
+                        wire_config = f"{code}-wire RTD"
 
         if wire_config:
             calib_parts.insert(0, wire_config)
