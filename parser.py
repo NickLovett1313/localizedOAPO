@@ -113,10 +113,6 @@ def parse_po(file):
 
 
 def parse_oa(file):
-    import pdfplumber
-    import pandas as pd
-    import re
-
     data = []
     order_total = ""
 
@@ -205,42 +201,38 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        # ✅ Stacked config logic
+        # ✅ Robust stacked calibration logic
         calib_parts = []
-wire_config = ''
+        wire_config = ''
 
-lines = block.split('\n')
+        for idx, l in enumerate(lines):
+            if re.search(r'-?\d+\s*to\s*-?\d+', l):
+                ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
 
-for idx, l in enumerate(lines):
-    if re.search(r'-?\d+\s*to\s*-?\d+', l):
-        ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
+                unit_clean = ""
+                if idx + 1 < len(lines):
+                    unit_line = lines[idx + 1].strip().upper()
+                    unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
+                    if unit_match:
+                        unit_clean = unit_match.group(0).strip().upper()
 
-        unit_clean = ""
-        if idx + 1 < len(lines):
-            unit_line = lines[idx + 1].strip().upper()
-            unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
-            if unit_match:
-                unit_clean = unit_match.group(0).strip().upper()
+                if idx + 2 < len(lines):
+                    config_line = lines[idx + 2].strip()
+                    if re.fullmatch(r'1[2-5]$', config_line):
+                        code = config_line[1]
+                        wire_config = f"{code}-wire RTD"
 
-        # Final robust: look exactly 2 lines below for a standalone wire digit
-        if idx + 2 < len(lines):
-            config_line = lines[idx + 2].strip()
-            if re.fullmatch(r'1[2-5]$', config_line):
-                code = config_line[1]
-                wire_config = f"{code}-wire RTD"
+                for r in ranges:
+                    if unit_clean:
+                        calib_parts.append(f"{r} {unit_clean}")
+                    else:
+                        calib_parts.append(r)
 
-        for r in ranges:
-            if unit_clean:
-                calib_parts.append(f"{r} {unit_clean}")
-            else:
-                calib_parts.append(r)
+        if wire_config:
+            calib_parts.insert(0, wire_config)
 
-if wire_config:
-    calib_parts.insert(0, wire_config)
-
-calib_data = 'Y' if calib_parts else 'N'
-calib_details = ", ".join(calib_parts)
-
+        calib_data = 'Y' if calib_parts else 'N'
+        calib_details = ", ".join(calib_parts)
 
         data.append({
             'Line No': int(line_no) if line_no else '',
