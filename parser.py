@@ -135,27 +135,23 @@ def parse_oa(file):
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    # ✅ Use non-capturing group to avoid None blocks
-    blocks = re.split(r'\n(0{2,}\d{2,}|\d+(?:\.\d+)+)', text)
+    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
 
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
         block = blocks[i+1]
 
-        if line_no and '.' in line_no:
+        if '.' in line_no:
             parts = line_no.split('.')
             try:
                 line_no = int(parts[0]) * 10
             except:
                 line_no = ''
-        elif line_no:
+        else:
             try:
                 line_no = int(line_no)
             except:
                 line_no = ''
-
-        if line_no and (line_no < 1 or line_no > 10000):
-            line_no = ''
 
         model = re.search(r'([A-Z0-9\-]{6,})', block)
         ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
