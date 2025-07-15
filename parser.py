@@ -1,3 +1,7 @@
+import pdfplumber
+import pandas as pd
+import re
+
 def parse_po(file):
     data = []
     order_total = ""
@@ -280,6 +284,7 @@ def parse_oa(file):
             'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
+
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
@@ -289,5 +294,3 @@ def parse_oa(file):
     df_tariff['Line No'] = ''
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
     return df
-
-
