@@ -53,6 +53,7 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
+        # ✅ Tweaked Multi-stack calib for PO
         calib_parts = []
         wire_configs = []
         lines = block.split('\n')
@@ -64,15 +65,18 @@ def parse_po(file):
                 unit_clean = ""
                 if idx + 1 < len(lines):
                     unit_line = lines[idx + 1].strip().upper()
-                    unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
+                    unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|KPAG|PSI|BAR|MBAR)', unit_line)
                     if unit_match:
                         unit_clean = unit_match.group(0).strip().upper()
 
                 if idx + 2 < len(lines):
-                    config_line = lines[idx + 2].strip()
-                    if re.fullmatch(r'1[2-5]', config_line):
-                        code = config_line[1]
+                    config_line = lines[idx + 2].strip().upper()
+                    wire_match = re.search(r'([2-5])-WIRE', config_line)
+                    if wire_match:
+                        code = wire_match.group(1)
                         wire_configs.append(f"{code}-wire RTD")
+                    elif 'WIRE' in config_line:
+                        wire_configs.append(config_line.title())
 
                 for r in ranges:
                     if unit_clean:
