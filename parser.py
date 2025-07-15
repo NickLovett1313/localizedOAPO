@@ -9,13 +9,15 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # ✅ Stop at the final Order Total to cut footer junk
+    # ✅ Stop at Order Total
     stop_match = re.search(r'Order total.*?\$?USD.*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    blocks = re.split(r'\n(0{3,}\d{2})', text)
+    # ✅ Updated block split: handles 00010, 00110, etc.
+    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
+
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
         block = blocks[i+1]
@@ -51,7 +53,6 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Multi-stack calib for PO
         calib_parts = []
         wire_configs = []
         lines = block.split('\n')
@@ -141,13 +142,14 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # ✅ Stop at the final Total (USD)
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    blocks = re.split(r'\n(000\d{2}|\d+\.\d+)', text)
+    # ✅ Updated block split
+    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
+
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
         block = blocks[i+1]
@@ -224,7 +226,6 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        # ✅ Multi-stack config logic with fallback
         calib_parts = []
         wire_configs = []
 
