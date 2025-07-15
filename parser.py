@@ -1,7 +1,3 @@
-import pdfplumber
-import pandas as pd
-import re
-
 def parse_po(file):
     data = []
     order_total = ""
@@ -65,8 +61,8 @@ def parse_po(file):
                 if wire_match:
                     wire_configs.append(f"{wire_match.group(1)}-wire RTD")
 
-                parts_clean = re.sub(r'([2-5])-WIRE RTD[:\\s]*', '', parts, flags=re.IGNORECASE)
-                parts_clean = re.sub(r'([2-5])-WIRE[:\\s]*', '', parts_clean, flags=re.IGNORECASE)
+                parts_clean = re.sub(r'([2-5])-WIRE RTD[:\s]*', '', parts, flags=re.IGNORECASE)
+                parts_clean = re.sub(r'([2-5])-WIRE[:\s]*', '', parts_clean, flags=re.IGNORECASE)
 
                 range_match = re.search(r'-?\d+\s*to\s*-?\d+.*', parts_clean)
                 if range_match:
@@ -139,11 +135,6 @@ def parse_oa(file):
 
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
-
-        # ✅ NEW: Filter suspicious line numbers (>4 digits)
-        if not re.fullmatch(r'\d{1,4}(\.\d+)?', line_no):
-            continue
-
         block = blocks[i+1]
 
         if '.' in line_no:
@@ -159,19 +150,12 @@ def parse_oa(file):
                 line_no = ''
 
         model = re.search(r'([A-Z0-9\-]{6,})', block)
-
-        # ✅ NEW: Filter out model numbers with no letters
-        if model:
-            candidate = model.group(1)
-            if not re.search(r'[A-Z]', candidate):
-                model = None
-
-        ship_date = re.search(r'Expected Ship Date: (\\d{2}-[A-Za-z]{3}-\\d{4})', block)
+        ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
         if not ship_date:
-            ship_date = re.search(r'([A-Za-z]{3} \\d{1,2}, \\d{4})', block)
+            ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
         qty, unit_price, total_price = '', '', ''
-        line_match = re.search(r'(^|\\s)(\\d+)\\s+([\\d,]+\\.\\d{2})\\s+([\\d,]+\\.\\d{2})', block)
+        line_match = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
         if line_match:
             qty = line_match.group(2)
             unit_price = line_match.group(3)
@@ -224,7 +208,7 @@ def parse_oa(file):
                     else:
                         if is_valid_tag(wire_candidate):
                             wire_on_tags.append(wire_candidate)
-                        elif re.search(r'IC\\d{2,5}-NC', wire_candidate.upper()):
+                        elif re.search(r'IC\d{2,5}-NC', wire_candidate.upper()):
                             wire_on_tags.append(wire_candidate)
 
         tags = list(set(tags))
@@ -235,12 +219,12 @@ def parse_oa(file):
         wire_configs = []
 
         for idx, l in enumerate(lines):
-            if re.search(r'-?\\d+\\s*to\\s*-?\\d+', l):
-                ranges = re.findall(r'-?\\d+\\s*to\\s*-?\\d+', l)
+            if re.search(r'-?\d+\s*to\s*-?\d+', l):
+                ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
                 unit_clean = ""
                 if idx + 1 < len(lines):
                     unit_line = lines[idx + 1].strip().upper()
-                    unit_match = re.search(r'(DEG\\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
+                    unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
                     if unit_match:
                         unit_clean = unit_match.group(0).strip().upper()
                 if idx + 2 < len(lines):
@@ -255,7 +239,7 @@ def parse_oa(file):
                         calib_parts.append(r)
 
         if not wire_configs:
-            wire_match = re.findall(r'\\s1([2-5])\\s', block)
+            wire_match = re.findall(r'\s1([2-5])\s', block)
             for m in wire_match:
                 wire_configs.append(f"{m}-wire RTD")
         wire_configs = list(set(wire_configs))
@@ -296,7 +280,6 @@ def parse_oa(file):
             'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
-
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
@@ -306,3 +289,5 @@ def parse_oa(file):
     df_tariff['Line No'] = ''
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
     return df
+
+
