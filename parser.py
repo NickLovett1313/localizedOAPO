@@ -202,35 +202,30 @@ def parse_oa(file):
             perm_matches_wire = ''
 
         calib_parts = []
-        range_lines = []
-        for l in lines:
-            if re.search(r'-?\d+\s*to\s*-?\d+', l):
-                range_lines.append(l)
-
-        for l in range_lines:
-            ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
-            unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', l, re.IGNORECASE)
-            unit_clean = unit_match.group(0).strip().upper() if unit_match else ""
-            for r in ranges:
-                if unit_clean:
-                    calib_parts.append(f"{r} {unit_clean}")
-                else:
-                    calib_parts.append(r)
-
         wire_config = ''
-        for l in range_lines:
-            idx = next((i for i, line in enumerate(lines) if l.strip() == line.strip()), None)
-            if idx is not None:
-                # Same line
-                if re.search(r'\b1[2-5]\b', lines[idx]):
-                    code = re.search(r'\b1([2-5])\b', lines[idx]).group(1)
-                    wire_config = f"{code}-wire RTD"
-                # Next line
-                elif idx + 1 < len(lines):
-                    next_line = lines[idx + 1].strip()
-                    if re.fullmatch(r'1[2-5]', next_line):
-                        code = next_line[1]
+
+        for idx, l in enumerate(lines):
+            if re.search(r'-?\d+\s*to\s*-?\d+', l):
+                ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
+                unit_clean = ""
+
+                if idx + 1 < len(lines):
+                    unit_line = lines[idx + 1].strip().upper()
+                    unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
+                    if unit_match:
+                        unit_clean = unit_match.group(0).strip().upper()
+
+                if idx + 2 < len(lines):
+                    config_line = lines[idx + 2].strip()
+                    if re.fullmatch(r'1[2-5]', config_line):
+                        code = config_line[1]
                         wire_config = f"{code}-wire RTD"
+
+                for r in ranges:
+                    if unit_clean:
+                        calib_parts.append(f"{r} {unit_clean}")
+                    else:
+                        calib_parts.append(r)
 
         if wire_config:
             calib_parts.insert(0, wire_config)
