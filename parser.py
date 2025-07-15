@@ -2,6 +2,68 @@ import pdfplumber
 import pandas as pd
 import re
 
+def extract_calib_data(lines, source='OA'):
+    calib_parts = []
+
+    valid_units = ['DEG C', 'DEG F', 'DEG K', 'KPA', 'KPAG', 'PSI', 'BAR', 'MBAR',
+                   'IN H2O', 'MM H2O', 'INHG', 'TORR', 'MPA', 'MMHG', 'CM H2O']
+
+    for idx, line in enumerate(lines):
+        range_match = re.search(r'(-?\d+)\s*to\s*(-?\d+)', line)
+        if range_match:
+            unit = ''
+            # Try to find unit on same line
+            for u in valid_units:
+                if u in line.upper():
+                    unit = u
+                    break
+            # If not found, check next line
+            if not unit and idx + 1 < len(lines):
+                next_line = lines[idx + 1].upper().strip()
+                for u in valid_units:
+                    if u in next_line:
+                        unit = u
+                        break
+            if unit:
+                calib_parts.append(f"{range_match.group(1)} to {range_match.group(2)} {unit}")
+            else:
+                calib_parts.append(f"{range_match.group(1)} to {range_match.group(2)}")
+
+    # Add wire config for OA if present
+    wire_config = ''
+    if source == 'OA':
+        for l in lines:
+            if re.fullmatch(r'\s*12\s*', l.strip()):
+                wire_config = '2-wire RTD'
+            elif re.fullmatch(r'\s*13\s*', l.strip()):
+                wire_config = '3-wire RTD'
+            elif re.fullmatch(r'\s*14\s*', l.strip()):
+                wire_config = '4-wire RTD'
+            elif '2-wire' in l.lower():
+                wire_config = '2-wire RTD'
+            elif '3-wire' in l.lower():
+                wire_config = '3-wire RTD'
+            elif '4-wire' in l.lower():
+                wire_config = '4-wire RTD'
+    if source == 'PO':
+        # For PO, detect `3-wire RTD:` style
+        for l in lines:
+            if '3-wire' in l.lower():
+                wire_config = '3-wire RTD'
+            elif '4-wire' in l.lower():
+                wire_config = '4-wire RTD'
+            elif '2-wire' in l.lower():
+                wire_config = '2-wire RTD'
+
+    if wire_config:
+        calib_parts.insert(0, wire_config)
+
+    if calib_parts:
+        return "Y", ", ".join(calib_parts)
+    else:
+        return "N", ""
+
+
 def parse_po(file):
     data = []
     order_total = ""
@@ -18,6 +80,7 @@ def parse_po(file):
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
         block = blocks[i+1]
+        lines = block.split('\n')
 
         model = re.search(r'([A-Z0-9\-]{6,})', block)
         ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
@@ -30,44 +93,12 @@ def parse_po(file):
             total_price = line_match.group(3)
 
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
-        tags = []
-        for t in tags_found:
-            is_model = model and t == model.group(1)
-            is_cve = 'CVE' in t or 'TSE' in t
-            has_letters = re.search(r'[A-Z]', t)
-            has_digits = re.search(r'\d', t)
-            is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
-            is_date = (
-                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
-                or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
-                or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
-            )
-            is_reasonable_len = 5 <= len(t) <= 30
-
-            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and is_reasonable_len:
-                tags.append(t)
+        tags = [t for t in tags_found if 'CVE' not in t and 'TSE' not in t]
 
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        if has_tag == 'Y':
-            calib_parts = []
-            block_lower = block.lower()
-            if re.search(r'\b3[-\s]?wire\b', block_lower):
-                calib_parts.append('3-wire RTD')
-            if re.search(r'\b4[-\s]?wire\b', block_lower):
-                calib_parts.append('4-wire RTD')
-
-            range_units = re.findall(r'(-?\d+\s*to\s*-?\d+)\s*([A-Za-z° ]+)', block)
-            for r, u in range_units:
-                full_range = f"{r} {u.strip()}"
-                calib_parts.append(full_range)
-
-            calib_data = 'Y' if calib_parts else 'N'
-            calib_details = ", ".join(calib_parts)
-        else:
-            calib_data = 'N'
-            calib_details = ''
+        calib_data, calib_details = extract_calib_data(lines, source='PO')
 
         data.append({
             'Line No': int(line_no) if line_no else '',
@@ -79,7 +110,7 @@ def parse_po(file):
             'Has Tag?': has_tag,
             'Tags': ", ".join(tags) if tags else '',
             'Calib Data?': calib_data,
-            'Calib Details': calib_details,
+            'Calib Data': calib_details,
             'PERM = WIRE?': ''
         })
 
@@ -96,19 +127,17 @@ def parse_po(file):
             'Has Tag?': '',
             'Tags': '',
             'Calib Data?': '',
-            'Calib Details': '',
+            'Calib Data': '',
             'PERM = WIRE?': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
-
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
 
     df = pd.concat([df_main, df_total], ignore_index=True)
-
     return df
 
 
@@ -128,6 +157,7 @@ def parse_oa(file):
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
         block = blocks[i+1]
+        lines = block.split('\n')
 
         if '.' in line_no:
             parts = line_no.split('.')
@@ -153,85 +183,29 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        wire_tag = ''
-        perm_matches_wire = ''
-
-        lines = block.split('\n')
-
-        def is_valid_tag(candidate):
-            if not candidate:
-                return False
-            tag_pattern = re.compile(r'^[A-Z]{2,3}-[A-Z0-9\-]{2,}$')
-            if not tag_pattern.match(candidate):
-                return False
-            has_letters = re.search(r'[A-Z]', candidate)
-            has_digits = re.search(r'\d', candidate)
-            has_dash = '-' in candidate
-            is_reasonable_len = 4 <= len(candidate) <= 30
-            is_not_date = not re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', candidate)
-            return has_letters and has_digits and has_dash and is_reasonable_len and is_not_date
-
         tags = []
         for idx, line in enumerate(lines):
             if 'PERM' in line or 'NAME' in line:
                 for offset in range(1, 4):
                     if idx + offset < len(lines):
                         possible = lines[idx + offset].strip()
-                        if is_valid_tag(possible):
+                        if '-' in possible and len(possible) <= 30:
                             tags.append(possible)
-
-        if not tags:
-            for l in lines:
-                possible = l.strip()
-                if is_valid_tag(possible):
-                    tags.append(possible)
 
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
+
         perm_tag = tags[0] if tags else ''
-
         wire_match = re.search(r'WIRE\s*:\s*\n?([A-Z0-9\-]+)', block)
-        if wire_match:
-            wire_tag = wire_match.group(1).strip()
+        wire_tag = wire_match.group(1).strip() if wire_match else ''
 
+        perm_matches_wire = ''
         if perm_tag and wire_tag:
             perm_matches_wire = 'Y' if perm_tag == wire_tag else 'N'
         elif perm_tag or wire_tag:
             perm_matches_wire = 'N'
-        else:
-            perm_matches_wire = ''
 
-        # ✅ Smart wire config near calibration range only
-        calib_parts = []
-        range_lines = []
-        for l in lines:
-            if re.search(r'-?\d+\s*to\s*-?\d+', l):
-                range_lines.append(l)
-
-        for l in range_lines:
-            ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
-            unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', l, re.IGNORECASE)
-            unit_clean = unit_match.group(0).strip().upper() if unit_match else ""
-            for r in ranges:
-                if unit_clean:
-                    calib_parts.append(f"{r} {unit_clean}")
-                else:
-                    calib_parts.append(r)
-
-        wire_config = ''
-        for l in range_lines:
-            if '12' in l:
-                wire_config = '2-wire RTD'
-            elif '13' in l:
-                wire_config = '3-wire RTD'
-            elif '14' in l:
-                wire_config = '4-wire RTD'
-
-        if wire_config:
-            calib_parts.insert(0, wire_config)
-
-        calib_data = 'Y' if calib_parts else 'N'
-        calib_details = ", ".join(calib_parts)
+        calib_data, calib_details = extract_calib_data(lines, source='OA')
 
         data.append({
             'Line No': int(line_no) if line_no else '',
@@ -243,7 +217,7 @@ def parse_oa(file):
             'Has Tag?': has_tag,
             'Tags': ", ".join(tags) if tags else '',
             'Calib Data?': calib_data,
-            'Calib Details': calib_details,
+            'Calib Data': calib_details,
             'PERM = WIRE?': perm_matches_wire
         })
 
@@ -260,14 +234,13 @@ def parse_oa(file):
             'Has Tag?': '',
             'Tags': '',
             'Calib Data?': '',
-            'Calib Details': '',
+            'Calib Data': '',
             'PERM = WIRE?': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
-
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
 
@@ -276,5 +249,4 @@ def parse_oa(file):
     df_tariff['Line No'] = ''
 
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
-
     return df
