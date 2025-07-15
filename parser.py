@@ -182,43 +182,35 @@ def parse_oa(file):
         tags = []
         wire_on_tags = []
 
+        # ✅ New robust OA tag parsing — scans all lines
         for idx, line in enumerate(lines):
-            if 'PERM' in line or 'NAME' in line or 'TAG CONFIGURATION' in line.upper():
-                for offset in range(1, 4):
-                    if idx + offset < len(lines):
-                        possible = lines[idx + offset].strip()
-                        if '/' in possible:
-                            parts = [p.strip() for p in possible.split('/') if p.strip()]
-                            for p in parts:
-                                if is_valid_tag(p):
-                                    tags.append(p)
-                        elif is_valid_tag(possible):
-                            tags.append(possible)
+            line_upper = line.upper().strip()
 
-                        for j in range(idx + offset + 1, len(lines)):
-                            if 'WIRE' in lines[j].upper():
-                                if j + 1 < len(lines):
-                                    wire_candidate = lines[j + 1].strip()
-                                    if '/' in wire_candidate:
-                                        parts = [p.strip() for p in wire_candidate.split('/') if p.strip()]
-                                        for p in parts:
-                                            if is_valid_tag(p):
-                                                wire_on_tags.append(p)
-                                    elif is_valid_tag(wire_candidate):
-                                        wire_on_tags.append(wire_candidate)
-                                    break
-                                break
-                        break
+            possible_tags = []
+            if '/' in line:
+                parts = [p.strip() for p in line.split('/') if p.strip()]
+                possible_tags.extend(parts)
+            else:
+                possible_tags.append(line.strip())
 
-        if not tags:
-            for l in lines:
-                possible = l.strip()
-                if is_valid_tag(possible):
-                    tags.append(possible)
+            for tag in possible_tags:
+                if is_valid_tag(tag):
+                    tags.append(tag)
+
+            if 'WIRE' in line_upper:
+                if idx + 1 < len(lines):
+                    wire_candidate = lines[idx + 1].strip()
+                    if '/' in wire_candidate:
+                        parts = [p.strip() for p in wire_candidate.split('/') if p.strip()]
+                        for p in parts:
+                            if is_valid_tag(p):
+                                wire_on_tags.append(p)
+                    elif is_valid_tag(wire_candidate):
+                        wire_on_tags.append(wire_candidate)
 
         tags = list(set(tags))
+        wire_on_tags = list(set(wire_on_tags))
         has_tag = 'Y' if tags else 'N'
-        wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
         calib_parts = []
         wire_configs = []
