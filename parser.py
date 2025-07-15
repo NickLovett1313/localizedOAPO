@@ -201,7 +201,7 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        # ✅ Stacked config + whole block scan for wire digit
+        # ✅ Final stacked config + whole block scan for wire digit
         calib_parts = []
         wire_config = ''
 
@@ -216,17 +216,24 @@ def parse_oa(file):
                     if unit_match:
                         unit_clean = unit_match.group(0).strip().upper()
 
+                if idx + 2 < len(lines):
+                    config_line = lines[idx + 2].strip()
+                    if re.fullmatch(r'1[2-5]', config_line):
+                        code = config_line[1]
+                        wire_config = f"{code}-wire RTD"
+
                 for r in ranges:
                     if unit_clean:
                         calib_parts.append(f"{r} {unit_clean}")
                     else:
                         calib_parts.append(r)
 
-        # ✅ Scan whole block for standalone wire config digit
-        wire_match = re.search(r'\s1([2-5])\s', block)
-        if wire_match:
-            code = wire_match.group(1)
-            wire_config = f"{code}-wire RTD"
+        # ✅ Fallback: scan entire block for standalone wire digit if not found yet
+        if not wire_config:
+            wire_match = re.search(r'\s1([2-5])\s', block)
+            if wire_match:
+                code = wire_match.group(1)
+                wire_config = f"{code}-wire RTD"
 
         if wire_config:
             calib_parts.insert(0, wire_config)
