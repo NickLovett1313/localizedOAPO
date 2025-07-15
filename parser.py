@@ -62,20 +62,16 @@ def parse_po(file):
             if 'RANGE:' in l_upper:
                 parts = l.split('Range:')[-1].strip()
 
-                # Grab wire config if present
                 wire_match = re.search(r'([2-5])-WIRE', parts, re.IGNORECASE)
                 if wire_match:
                     wire_configs.append(f"{wire_match.group(1)}-wire RTD")
 
-                # Remove wire bit so range stays clean
                 parts_clean = re.sub(r'([2-5])-WIRE RTD[:\s]*', '', parts, flags=re.IGNORECASE)
                 parts_clean = re.sub(r'([2-5])-WIRE[:\s]*', '', parts_clean, flags=re.IGNORECASE)
 
-                # Example: '0 to 50 deg C'
                 range_match = re.search(r'-?\d+\s*to\s*-?\d+.*', parts_clean)
                 if range_match:
                     value = range_match.group(0).strip()
-                    # Uppercase unit but keep 'to' lowercase
                     value = re.sub(r'deg c', 'DEG C', value, flags=re.IGNORECASE)
                     value = re.sub(r'kpag', 'KPAG', value, flags=re.IGNORECASE)
                     calib_parts.append(value)
@@ -98,7 +94,7 @@ def parse_po(file):
             'Tags': ", ".join(tags) if tags else '',
             'Calib Data?': calib_data,
             'Calib Details': calib_details,
-            'PERM = WIRE?': ''
+            'PERM = WIRE?': ''   # ✅ PO always blank
         })
 
     df = pd.DataFrame(data)
@@ -173,6 +169,7 @@ def parse_oa(file):
             total_price = line_match.group(4)
 
         wire_tag = ''
+        perm_tag = ''
         perm_matches_wire = ''
 
         lines = block.split('\n')
@@ -198,20 +195,26 @@ def parse_oa(file):
                         possible = lines[idx + offset].strip()
                         if is_valid_tag(possible):
                             tags.append(possible)
+                            perm_tag = possible
 
         if not tags:
             for l in lines:
                 possible = l.strip()
                 if is_valid_tag(possible):
                     tags.append(possible)
+                    perm_tag = possible
 
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
-        perm_tag = tags[0] if tags else ''
 
-        wire_match = re.search(r'WIRE\s*:\s*\n?([A-Z0-9\-]+)', block)
-        if wire_match:
-            wire_tag = wire_match.group(1).strip()
+        # ✅ NEW: WIRE match check
+        for idx, line in enumerate(lines):
+            if 'WIRE' in line.upper():
+                for offset in range(1, 3):
+                    if idx + offset < len(lines):
+                        possible = lines[idx + offset].strip()
+                        if is_valid_tag(possible):
+                            wire_tag = possible
 
         if perm_tag and wire_tag:
             perm_matches_wire = 'Y' if perm_tag == wire_tag else 'N'
