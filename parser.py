@@ -50,24 +50,46 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        if has_tag == 'Y':
-            calib_parts = []
-            block_lower = block.lower()
-            if re.search(r'\b3[-\s]?wire\b', block_lower):
-                calib_parts.append('3-wire RTD')
-            if re.search(r'\b4[-\s]?wire\b', block_lower):
-                calib_parts.append('4-wire RTD')
+        # ✅ Multi-stack calib logic for PO (if ever used)
+        calib_parts = []
+        wire_configs = []
 
-            range_units = re.findall(r'(-?\d+\s*to\s*-?\d+)\s*([A-Za-z° ]+)', block)
-            for r, u in range_units:
-                full_range = f"{r} {u.strip()}"
-                calib_parts.append(full_range)
+        lines = block.split('\n')
 
-            calib_data = 'Y' if calib_parts else 'N'
-            calib_details = ", ".join(calib_parts)
-        else:
-            calib_data = 'N'
-            calib_details = ''
+        for idx, l in enumerate(lines):
+            if re.search(r'-?\d+\s*to\s*-?\d+', l):
+                ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
+
+                if idx + 1 < len(lines):
+                    unit_line = lines[idx + 1].strip().upper()
+                    unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
+                    unit_clean = unit_match.group(0).strip().upper() if unit_match else ''
+                else:
+                    unit_clean = ''
+
+                if idx + 2 < len(lines):
+                    config_line = lines[idx + 2].strip()
+                    if re.fullmatch(r'1[2-5]', config_line):
+                        code = config_line[1]
+                        wire_configs.append(f"{code}-wire RTD")
+
+                for r in ranges:
+                    if unit_clean:
+                        calib_parts.append(f"{r} {unit_clean}")
+                    else:
+                        calib_parts.append(r)
+
+        if not wire_configs:
+            wire_match = re.findall(r'\s1([2-5])\s', block)
+            for m in wire_match:
+                wire_configs.append(f"{m}-wire RTD")
+
+        wire_configs = list(set(wire_configs))
+        if wire_configs:
+            calib_parts = wire_configs + calib_parts
+
+        calib_data = 'Y' if calib_parts else 'N'
+        calib_details = ", ".join(calib_parts)
 
         data.append({
             'Line No': int(line_no) if line_no else '',
@@ -201,9 +223,9 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        # ✅ Final stacked config + whole block scan for wire digit
+        # ✅ Multi-stack config logic with whole block fallback
         calib_parts = []
-        wire_config = ''
+        wire_configs = []
 
         for idx, l in enumerate(lines):
             if re.search(r'-?\d+\s*to\s*-?\d+', l):
@@ -220,7 +242,7 @@ def parse_oa(file):
                     config_line = lines[idx + 2].strip()
                     if re.fullmatch(r'1[2-5]', config_line):
                         code = config_line[1]
-                        wire_config = f"{code}-wire RTD"
+                        wire_configs.append(f"{code}-wire RTD")
 
                 for r in ranges:
                     if unit_clean:
@@ -228,15 +250,14 @@ def parse_oa(file):
                     else:
                         calib_parts.append(r)
 
-        # ✅ Fallback: scan entire block for standalone wire digit if not found yet
-        if not wire_config:
-            wire_match = re.search(r'\s1([2-5])\s', block)
-            if wire_match:
-                code = wire_match.group(1)
-                wire_config = f"{code}-wire RTD"
+        if not wire_configs:
+            wire_match = re.findall(r'\s1([2-5])\s', block)
+            for m in wire_match:
+                wire_configs.append(f"{m}-wire RTD")
 
-        if wire_config:
-            calib_parts.insert(0, wire_config)
+        wire_configs = list(set(wire_configs))
+        if wire_configs:
+            calib_parts = wire_configs + calib_parts
 
         calib_data = 'Y' if calib_parts else 'N'
         calib_details = ", ".join(calib_parts)
