@@ -122,6 +122,7 @@ def parse_po(file):
 
     return df
 
+
 def parse_oa(file):
     data = []
     order_total = ""
@@ -182,7 +183,6 @@ def parse_oa(file):
         tags = []
         wire_on_tags = []
 
-        # ✅ New robust OA tag parsing — scans all lines
         for idx, line in enumerate(lines):
             line_upper = line.upper().strip()
 
@@ -196,6 +196,8 @@ def parse_oa(file):
             for tag in possible_tags:
                 if is_valid_tag(tag):
                     tags.append(tag)
+                elif re.search(r'IC\d{2,5}-NC', tag.upper()):
+                    tags.append(tag)
 
             if 'WIRE' in line_upper:
                 if idx + 1 < len(lines):
@@ -205,8 +207,13 @@ def parse_oa(file):
                         for p in parts:
                             if is_valid_tag(p):
                                 wire_on_tags.append(p)
-                    elif is_valid_tag(wire_candidate):
-                        wire_on_tags.append(wire_candidate)
+                            elif re.search(r'IC\d{2,5}-NC', p.upper()):
+                                wire_on_tags.append(p)
+                    else:
+                        if is_valid_tag(wire_candidate):
+                            wire_on_tags.append(wire_candidate)
+                        elif re.search(r'IC\d{2,5}-NC', wire_candidate.upper()):
+                            wire_on_tags.append(wire_candidate)
 
         tags = list(set(tags))
         wire_on_tags = list(set(wire_on_tags))
