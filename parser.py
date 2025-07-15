@@ -122,7 +122,6 @@ def parse_po(file):
 
     return df
 
-
 def parse_oa(file):
     data = []
     order_total = ""
@@ -170,13 +169,6 @@ def parse_oa(file):
         def is_valid_tag(candidate):
             if not candidate:
                 return False
-            # ✅ Special case: handle slash NC tags
-            if '/' in candidate:
-                parts = [p.strip() for p in candidate.split('/')]
-                if len(parts) == 2:
-                    pattern = re.compile(r'^[A-Z]{2,3}-[A-Z0-9\-]{2,}$')
-                    if pattern.match(parts[0]) and pattern.match(parts[1]):
-                        return True
             tag_pattern = re.compile(r'^[A-Z]{2,3}-[A-Z0-9\-]{2,}$')
             if not tag_pattern.match(candidate):
                 return False
@@ -195,17 +187,28 @@ def parse_oa(file):
                 for offset in range(1, 4):
                     if idx + offset < len(lines):
                         possible = lines[idx + offset].strip()
-                        if is_valid_tag(possible):
+                        if '/' in possible:
+                            parts = [p.strip() for p in possible.split('/')]
+                            for p in parts:
+                                if is_valid_tag(p):
+                                    tags.append(p)
+                        elif is_valid_tag(possible):
                             tags.append(possible)
-                            for j in range(idx + offset + 1, len(lines)):
-                                if 'WIRE' in lines[j].upper():
-                                    if j + 1 < len(lines):
-                                        candidate = lines[j + 1].strip()
-                                        if is_valid_tag(candidate):
-                                            wire_on_tags.append(candidate)
-                                        break
+
+                        for j in range(idx + offset + 1, len(lines)):
+                            if 'WIRE' in lines[j].upper():
+                                if j + 1 < len(lines):
+                                    wire_candidate = lines[j + 1].strip()
+                                    if '/' in wire_candidate:
+                                        parts = [p.strip() for p in wire_candidate.split('/')]
+                                        for p in parts:
+                                            if is_valid_tag(p):
+                                                wire_on_tags.append(p)
+                                    elif is_valid_tag(wire_candidate):
+                                        wire_on_tags.append(wire_candidate)
                                     break
-                            break
+                                break
+                        break
 
         if not tags:
             for l in lines:
