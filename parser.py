@@ -9,12 +9,8 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # ✅ Hard stop for PO at Spartan GST#
-    stop_match = re.search(r'Spartan GST#', text, re.IGNORECASE)
-    if stop_match:
-        text = text.split(stop_match.group(0))[0]
-
-    stop_match = re.search(r'Order Total.*?\$?\(?USD\)?\s*([\d,]+\.\d{2})', text, re.IGNORECASE)
+    # ✅ Stop at the final Order Total to cut footer junk
+    stop_match = re.search(r'Order total.*?\$?USD.*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
@@ -145,11 +141,7 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # ✅ Hard stop for OA at Order Note(s)
-    stop_match = re.search(r'Order Note', text, re.IGNORECASE)
-    if stop_match:
-        text = text.split(stop_match.group(0))[0]
-
+    # ✅ Stop at the final Total (USD)
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
@@ -232,7 +224,7 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        # ✅ Multi-stack config logic with whole block fallback for OA
+        # ✅ Multi-stack config logic with fallback
         calib_parts = []
         wire_configs = []
 
