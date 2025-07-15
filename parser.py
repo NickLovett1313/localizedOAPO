@@ -9,6 +9,11 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
+    # ✅ Hard stop for PO at Spartan GST#
+    stop_match = re.search(r'Spartan GST#', text, re.IGNORECASE)
+    if stop_match:
+        text = text.split(stop_match.group(0))[0]
+
     stop_match = re.search(r'Order Total.*?\$?\(?USD\)?\s*([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
@@ -50,22 +55,21 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Multi-stack calib logic for PO (if ever used)
+        # ✅ Multi-stack calib for PO
         calib_parts = []
         wire_configs = []
-
         lines = block.split('\n')
 
         for idx, l in enumerate(lines):
             if re.search(r'-?\d+\s*to\s*-?\d+', l):
                 ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
 
+                unit_clean = ""
                 if idx + 1 < len(lines):
                     unit_line = lines[idx + 1].strip().upper()
                     unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
-                    unit_clean = unit_match.group(0).strip().upper() if unit_match else ''
-                else:
-                    unit_clean = ''
+                    if unit_match:
+                        unit_clean = unit_match.group(0).strip().upper()
 
                 if idx + 2 < len(lines):
                     config_line = lines[idx + 2].strip()
@@ -140,6 +144,11 @@ def parse_oa(file):
 
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
+
+    # ✅ Hard stop for OA at Order Note(s)
+    stop_match = re.search(r'Order Note', text, re.IGNORECASE)
+    if stop_match:
+        text = text.split(stop_match.group(0))[0]
 
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
@@ -223,7 +232,7 @@ def parse_oa(file):
         else:
             perm_matches_wire = ''
 
-        # ✅ Multi-stack config logic with whole block fallback
+        # ✅ Multi-stack config logic with whole block fallback for OA
         calib_parts = []
         wire_configs = []
 
