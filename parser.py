@@ -30,23 +30,30 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
-        tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
+        # ✅ NEW: Robust tag matching — captures slashed tags like 'LIT-00101 / IC0077-NC'
+        tags_found = re.findall(
+            r'([A-Z]{2,3}[0-9]{0,5}-[A-Z0-9\-]{2,}(?:\s*/\s*[A-Z]{2,3}[0-9]{0,5}-[A-Z0-9\-]{2,})*)',
+            block
+        )
+
         tags = []
         for t in tags_found:
-            is_model = model and t == model.group(1)
-            is_cve = 'CVE' in t or 'TSE' in t
-            has_letters = re.search(r'[A-Z]', t)
-            has_digits = re.search(r'\d', t)
-            is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
-            is_date = (
-                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
-                or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
-                or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
-            )
-            is_reasonable_len = 5 <= len(t) <= 30
+            parts = [p.strip() for p in t.split('/') if p.strip()]
+            for p in parts:
+                is_model = model and p == model.group(1)
+                is_cve = 'CVE' in p or 'TSE' in p
+                has_letters = re.search(r'[A-Z]', p)
+                has_digits = re.search(r'\d', p)
+                is_all_digits = bool(re.fullmatch(r'[\d\-]+', p))
+                is_date = (
+                    re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', p)
+                    or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', p)
+                    or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', p)
+                )
+                is_reasonable_len = 5 <= len(p) <= 30
 
-            if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and is_reasonable_len:
-                tags.append(t)
+                if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and is_reasonable_len:
+                    tags.append(p)
 
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
@@ -121,6 +128,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
 def parse_oa(file):
     data = []
