@@ -51,7 +51,7 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Improved PO Multi-stack calib: robust Range + wire + unit logic
+        # ✅ Improved PO Multi-stack calib
         calib_parts = []
         wire_configs = []
 
@@ -61,7 +61,6 @@ def parse_po(file):
             l_upper = l.strip().upper()
             if 'RANGE:' in l_upper:
                 parts = l.split('Range:')[-1].strip()
-
                 wire_match = re.search(r'([2-5])-WIRE', parts, re.IGNORECASE)
                 if wire_match:
                     wire_configs.append(f"{wire_match.group(1)}-wire RTD")
@@ -94,7 +93,7 @@ def parse_po(file):
             'Tags': ", ".join(tags) if tags else '',
             'Calib Data?': calib_data,
             'Calib Details': calib_details,
-            'PERM = WIRE?': ''   # ✅ PO always blank
+            'PERM = WIRE?': ''
         })
 
     df = pd.DataFrame(data)
@@ -194,6 +193,7 @@ def parse_oa(file):
                         if is_valid_tag(perm_candidate):
                             perm_tag = perm_candidate
                             wire_tag = ''
+                            # ✅ Look for WIRE within this chunk only
                             for j in range(idx + offset + 1, len(lines)):
                                 if 'WIRE' in lines[j].upper():
                                     for k in range(j + 1, len(lines)):
