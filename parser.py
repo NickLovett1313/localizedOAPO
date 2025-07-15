@@ -168,10 +168,6 @@ def parse_oa(file):
             unit_price = line_match.group(3)
             total_price = line_match.group(4)
 
-        wire_tag = ''
-        perm_tag = ''
-        perm_matches_wire = ''
-
         lines = block.split('\n')
 
         def is_valid_tag(candidate):
@@ -188,40 +184,41 @@ def parse_oa(file):
             return has_letters and has_digits and has_dash and is_reasonable_len and is_not_date
 
         tags = []
+        perm_wire_pairs = []
+
         for idx, line in enumerate(lines):
             if 'PERM' in line or 'NAME' in line:
                 for offset in range(1, 4):
                     if idx + offset < len(lines):
-                        possible = lines[idx + offset].strip()
-                        if is_valid_tag(possible):
-                            tags.append(possible)
-                            perm_tag = possible
+                        perm_candidate = lines[idx + offset].strip()
+                        if is_valid_tag(perm_candidate):
+                            perm_tag = perm_candidate
+                            wire_tag = ''
+                            for j in range(idx + offset + 1, len(lines)):
+                                if 'WIRE' in lines[j].upper():
+                                    for k in range(j + 1, len(lines)):
+                                        wire_candidate = lines[k].strip()
+                                        if is_valid_tag(wire_candidate):
+                                            wire_tag = wire_candidate
+                                            break
+                                    break
+                            perm_wire_pairs.append((perm_tag, wire_tag))
+                            tags.append(perm_tag)
 
         if not tags:
             for l in lines:
                 possible = l.strip()
                 if is_valid_tag(possible):
                     tags.append(possible)
-                    perm_tag = possible
 
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ NEW: WIRE match check
-        for idx, line in enumerate(lines):
-            if 'WIRE' in line.upper():
-                for offset in range(1, 3):
-                    if idx + offset < len(lines):
-                        possible = lines[idx + offset].strip()
-                        if is_valid_tag(possible):
-                            wire_tag = possible
-
-        if perm_tag and wire_tag:
-            perm_matches_wire = 'Y' if perm_tag == wire_tag else 'N'
-        elif perm_tag or wire_tag:
-            perm_matches_wire = 'N'
+        if perm_wire_pairs:
+            matches = sum(1 for perm, wire in perm_wire_pairs if perm == wire)
+            perm_matches_wire = 'Y' if matches == len(perm_wire_pairs) else 'N'
         else:
-            perm_matches_wire = ''
+            perm_matches_wire = 'NA'
 
         calib_parts = []
         wire_configs = []
