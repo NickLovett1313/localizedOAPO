@@ -91,9 +91,9 @@ def parse_po(file):
             'Total Price': total_price,
             'Has Tag?': has_tag,
             'Tags': ", ".join(tags) if tags else '',
+            'Wire-on Tag': '',   # ✅ PO: always blank for now
             'Calib Data?': calib_data,
-            'Calib Details': calib_details,
-            'PERM = WIRE?': ''
+            'Calib Details': calib_details
         })
 
     df = pd.DataFrame(data)
@@ -108,9 +108,9 @@ def parse_po(file):
             'Total Price': order_total,
             'Has Tag?': '',
             'Tags': '',
+            'Wire-on Tag': '',
             'Calib Data?': '',
-            'Calib Details': '',
-            'PERM = WIRE?': ''
+            'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
@@ -183,27 +183,26 @@ def parse_oa(file):
             return has_letters and has_digits and has_dash and is_reasonable_len and is_not_date
 
         tags = []
-        perm_wire_pairs = []
+        wire_on_tags = []
 
         for idx, line in enumerate(lines):
             if 'PERM' in line or 'NAME' in line:
                 for offset in range(1, 4):
                     if idx + offset < len(lines):
-                        perm_candidate = lines[idx + offset].strip()
-                        if is_valid_tag(perm_candidate):
-                            perm_tag = perm_candidate
+                        possible = lines[idx + offset].strip()
+                        if is_valid_tag(possible):
+                            tags.append(possible)
+                            # Now look for WIRE within this chunk
                             wire_tag = ''
-                            # ✅ Look for WIRE within this chunk only
                             for j in range(idx + offset + 1, len(lines)):
                                 if 'WIRE' in lines[j].upper():
-                                    for k in range(j + 1, len(lines)):
-                                        wire_candidate = lines[k].strip()
-                                        if is_valid_tag(wire_candidate):
-                                            wire_tag = wire_candidate
+                                    if j + 1 < len(lines):
+                                        candidate = lines[j + 1].strip()
+                                        if is_valid_tag(candidate):
+                                            wire_tag = candidate
+                                            wire_on_tags.append(wire_tag)
                                             break
                                     break
-                            perm_wire_pairs.append((perm_tag, wire_tag))
-                            tags.append(perm_tag)
 
         if not tags:
             for l in lines:
@@ -213,12 +212,6 @@ def parse_oa(file):
 
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
-
-        if perm_wire_pairs:
-            matches = sum(1 for perm, wire in perm_wire_pairs if perm == wire)
-            perm_matches_wire = 'Y' if matches == len(perm_wire_pairs) else 'N'
-        else:
-            perm_matches_wire = 'NA'
 
         calib_parts = []
         wire_configs = []
@@ -267,9 +260,9 @@ def parse_oa(file):
             'Total Price': total_price,
             'Has Tag?': has_tag,
             'Tags': ", ".join(tags) if tags else '',
+            'Wire-on Tag': ", ".join(wire_on_tags) if wire_on_tags else '',
             'Calib Data?': calib_data,
-            'Calib Details': calib_details,
-            'PERM = WIRE?': perm_matches_wire
+            'Calib Details': calib_details
         })
 
     df = pd.DataFrame(data)
@@ -284,9 +277,9 @@ def parse_oa(file):
             'Total Price': order_total,
             'Has Tag?': '',
             'Tags': '',
+            'Wire-on Tag': '',
             'Calib Data?': '',
-            'Calib Details': '',
-            'PERM = WIRE?': ''
+            'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
