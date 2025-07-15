@@ -9,13 +9,11 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # ✅ Stop at Order Total
     stop_match = re.search(r'Order total.*?\$?USD.*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    # ✅ Updated block split: handles 00010, 00110, etc.
     blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
 
     for i in range(1, len(blocks) - 1, 2):
@@ -53,41 +51,28 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ✅ Tweaked Multi-stack calib for PO
+        # ✅ NEW Multi-stack calib for PO — robust 'Range:' logic
         calib_parts = []
         wire_configs = []
+
         lines = block.split('\n')
 
-        for idx, l in enumerate(lines):
-            if re.search(r'-?\d+\s*to\s*-?\d+', l):
-                ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
+        for l in lines:
+            l_upper = l.strip().upper()
+            if 'RANGE:' in l_upper:
+                parts = l.split('Range:')[-1].strip()
 
-                unit_clean = ""
-                if idx + 1 < len(lines):
-                    unit_line = lines[idx + 1].strip().upper()
-                    unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|KPAG|PSI|BAR|MBAR)', unit_line)
-                    if unit_match:
-                        unit_clean = unit_match.group(0).strip().upper()
+                wire_match = re.search(r'([2-5])-WIRE', parts)
+                if wire_match:
+                    wire_configs.append(f"{wire_match.group(1)}-wire RTD")
 
-                if idx + 2 < len(lines):
-                    config_line = lines[idx + 2].strip().upper()
-                    wire_match = re.search(r'([2-5])-WIRE', config_line)
-                    if wire_match:
-                        code = wire_match.group(1)
-                        wire_configs.append(f"{code}-wire RTD")
-                    elif 'WIRE' in config_line:
-                        wire_configs.append(config_line.title())
+                # Remove wire bit so range stays clean
+                parts_clean = re.sub(r'([2-5])-WIRE RTD[:\s]*', '', parts, flags=re.IGNORECASE)
+                parts_clean = re.sub(r'([2-5])-WIRE[:\s]*', '', parts_clean, flags=re.IGNORECASE)
 
-                for r in ranges:
-                    if unit_clean:
-                        calib_parts.append(f"{r} {unit_clean}")
-                    else:
-                        calib_parts.append(r)
-
-        if not wire_configs:
-            wire_match = re.findall(r'\s1([2-5])\s', block)
-            for m in wire_match:
-                wire_configs.append(f"{m}-wire RTD")
+                range_match = re.search(r'-?\d+\s*to\s*-?\d+.*', parts_clean)
+                if range_match:
+                    calib_parts.append(range_match.group(0).strip().upper())
 
         wire_configs = list(set(wire_configs))
         if wire_configs:
@@ -151,7 +136,6 @@ def parse_oa(file):
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    # ✅ Updated block split
     blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
 
     for i in range(1, len(blocks) - 1, 2):
