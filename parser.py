@@ -135,7 +135,8 @@ def parse_oa(file):
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
+    # ✅ Improved: refined regex for real line numbers
+    blocks = re.split(r'\n(0{2,}\d{2,}|\d+(\.\d+)+)', text)
 
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
@@ -152,6 +153,10 @@ def parse_oa(file):
                 line_no = int(line_no)
             except:
                 line_no = ''
+
+        # ✅ Sanity check for noise
+        if line_no and (line_no < 1 or line_no > 10000):
+            line_no = ''
 
         model = re.search(r'([A-Z0-9\-]{6,})', block)
         ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
