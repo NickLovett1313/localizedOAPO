@@ -30,20 +30,7 @@ def parse_po(file):
             unit_price = line_match.group(2)
             total_price = line_match.group(3)
 
-        lines = block.split('\n')
-
-        # ✅ Improved: robust PO tag parsing with slash split
-        tags_found = []
-        for line in lines:
-            if '/' in line:
-                parts = [p.strip() for p in line.split('/') if p.strip()]
-                for p in parts:
-                    if '-' in p:
-                        tags_found.append(p)
-            else:
-                matches = re.findall(r'[A-Z]{2,3}[0-9]{0,5}-[A-Z0-9\-]{2,}', line)
-                tags_found.extend(matches)
-
+        tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
             is_model = model and t == model.group(1)
@@ -66,6 +53,8 @@ def parse_po(file):
 
         calib_parts = []
         wire_configs = []
+
+        lines = block.split('\n')
 
         for l in lines:
             l_upper = l.strip().upper()
@@ -133,7 +122,6 @@ def parse_po(file):
 
     return df
 
-
 def parse_oa(file):
     data = []
     order_total = ""
@@ -195,12 +183,12 @@ def parse_oa(file):
         wire_on_tags = []
 
         for idx, line in enumerate(lines):
-            if 'PERM' in line or 'NAME' in line:
+            if 'PERM' in line or 'NAME' in line or 'TAG CONFIGURATION' in line.upper():
                 for offset in range(1, 4):
                     if idx + offset < len(lines):
                         possible = lines[idx + offset].strip()
                         if '/' in possible:
-                            parts = [p.strip() for p in possible.split('/')]
+                            parts = [p.strip() for p in possible.split('/') if p.strip()]
                             for p in parts:
                                 if is_valid_tag(p):
                                     tags.append(p)
@@ -212,7 +200,7 @@ def parse_oa(file):
                                 if j + 1 < len(lines):
                                     wire_candidate = lines[j + 1].strip()
                                     if '/' in wire_candidate:
-                                        parts = [p.strip() for p in wire_candidate.split('/')]
+                                        parts = [p.strip() for p in wire_candidate.split('/') if p.strip()]
                                         for p in parts:
                                             if is_valid_tag(p):
                                                 wire_on_tags.append(p)
