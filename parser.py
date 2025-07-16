@@ -183,7 +183,15 @@ def parse_oa(file):
 
                 if not is_model and not is_cve and has_letters and has_digits and not is_all_dig and not is_date and good_len:
                     tags.append(t)
+
             tags = list(set(tags))
+
+            # Exclude the Customer PO number if it was picked up
+            cp_match = re.search(r'Customer PO No[:\s]+([A-Z0-9-]+)', block, re.IGNORECASE)
+            if cp_match:
+                cust_po = cp_match.group(1).strip()
+                tags = [t for t in tags if t != cust_po]
+
             has_tag = 'Y' if tags else 'N'
 
             # —— WIRE-ON TAGS —— 
@@ -194,11 +202,7 @@ def parse_oa(file):
                         p = p.strip()
                         if not p:
                             continue
-                        # if it matched our main tags list, grab it
-                        if p in tags:
-                            wire_on_tags.append(p)
-                        # otherwise, if it looks like a tag, grab it anyway
-                        elif re.match(r'^[A-Z0-9]{2,}-[A-Z0-9\-]{2,}$', p):
+                        if p in tags or re.match(r'^[A-Z0-9]{2,}-[A-Z0-9\-]{2,}$', p):
                             wire_on_tags.append(p)
             wire_on_tags = list(set(wire_on_tags))
 
@@ -206,16 +210,13 @@ def parse_oa(file):
             calib_parts = []
             wire_configs = []
             for idx, l in enumerate(lines):
-                # ranges
                 if re.search(r'-?\d+\s*to\s*-?\d+', l):
                     ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
                     unit_clean = ''
-                    # unit on next line
                     if idx + 1 < len(lines):
                         um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines[idx+1].upper())
                         if um:
                             unit_clean = um.group(0).strip().upper()
-                    # wire-count on line after that
                     if idx + 2 < len(lines) and re.fullmatch(r'1[2-5]', lines[idx+2].strip()):
                         code = lines[idx+2].strip()[1]
                         wire_configs.append(f"{code}-wire RTD")
@@ -284,3 +285,4 @@ def parse_oa(file):
     df = df.dropna(how='all').reset_index(drop=True)
 
     return df
+
