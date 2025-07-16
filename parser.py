@@ -130,54 +130,60 @@ def parse_oa(file):
     data = []
     order_total = ""
 
+    # Read PDF text
     with pdfplumber.open(file) as pdf:
         text = "\n".join(p.extract_text() for p in pdf.pages)
 
-    # pull off the final total and trim it out
+    # Extract and remove final total
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    # split on 5-digit line numbers, including slash-sets like "00030/00040"
+    # Split into blocks by 5-digit line numbers (including slash groups)
     blocks = re.split(r'\n(\d{5}(?:/\d{5})*)', text)
 
     for i in range(1, len(blocks) - 1, 2):
         raw_line_no = blocks[i].strip()
         block = blocks[i + 1]
 
-        # extract Customer PO No once, to exclude from tags
-        cp_match = re.search(r'Customer PO No[:\s]+([A-Z0-9\-]+)', block, re.IGNORECASE)
+        # Extract the Customer PO No once per block
+        cp_match = re.search(r'Customer PO No[:\s]+([^\n]+)', block, re.IGNORECASE)
         cust_po = cp_match.group(1).strip() if cp_match else None
 
-        # if there's a slash in the line number, we'll emit one row per number
+        # Prepare the text for tag detection: remove the CP number so it never matches
+        tag_block = block
+        if cust_po:
+            tag_block = tag_block.replace(cust_po, "")
+
+        # Handle slash-separated line numbers
         line_nos = [ln for ln in raw_line_no.split('/') if ln.strip()]
 
         for line_no in line_nos:
-            # model & ship date
+            # Model number
             model = re.search(r'([A-Z0-9\-_]{6,})', block)
+
+            # Ship date
             ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
             if not ship_date:
                 ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
-            # qty / prices
-            qty = unit_price = total_price = ''
+            # Qty / Unit / Total prices
+            qty = unit_price = total_price = ""
             m = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
             if m:
-                qty = m.group(2)
-                unit_price = m.group(3)
-                total_price = m.group(4)
+                qty, unit_price, total_price = m.group(2), m.group(3), m.group(4)
 
             lines = block.split('\n')
 
             # —— TAGS —— 
-            tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
+            tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block)
             tags = []
             for t in tags_found:
-                # skip customer PO or any variant
+                # Skip any variant of the Customer PO No
                 if cust_po and (t == cust_po or t.startswith(cust_po) or cust_po.startswith(t)):
                     continue
-                # original tag filters
+                # Original filters
                 is_model    = model and t == model.group(1)
                 is_cve      = 'CVE' in t or 'TSE' in t
                 has_letters = bool(re.search(r'[A-Z]', t))
@@ -213,7 +219,7 @@ def parse_oa(file):
             for idx, l in enumerate(lines):
                 if re.search(r'-?\d+\s*to\s*-?\d+', l):
                     ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
-                    unit_clean = ''
+                    unit_clean = ""
                     if idx + 1 < len(lines):
                         um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines[idx+1].upper())
                         if um:
@@ -224,7 +230,7 @@ def parse_oa(file):
                     for r in ranges:
                         calib_parts.append(f"{r} {unit_clean}".strip())
 
-            # fallback wire count search
+            # Fallback wire count search
             if not wire_configs:
                 for m in re.findall(r'\s1([2-5])\s', block):
                     wire_configs.append(f"{m}-wire RTD")
@@ -250,35 +256,34 @@ def parse_oa(file):
                 'Calib Details': calib_details
             })
 
-    # assemble dataframe and append total row if present
+    # Build DataFrame and append ORDER TOTAL row
     df = pd.DataFrame(data)
     if order_total:
-        total_row = {
-            'Line No':       '',
-            'Model Number':  'ORDER TOTAL',
-            'Ship Date':     '',
-            'Qty':           '',
-            'Unit Price':    '',
-            'Total Price':   order_total,
-            'Has Tag?':      '',
-            'Tags':          '',
-            'Wire-on Tag':   '',
-            'Calib Data?':   '',
-            'Calib Details': ''
-        }
-        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+        df = pd.concat([
+            df,
+            pd.DataFrame([{
+                'Line No':       '',
+                'Model Number':  'ORDER TOTAL',
+                'Ship Date':     '',
+                'Qty':           '',
+                'Unit Price':    '',
+                'Total Price':   order_total,
+                'Has Tag?':      '',
+                'Tags':          '',
+                'Wire-on Tag':   '',
+                'Calib Data?':   '',
+                'Calib Details': ''
+            }])
+        ], ignore_index=True)
 
-    # final sorting/filtering
+    # Final sorting, tariff placement, and cleanup
     df_main   = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total  = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
-
-    # put any tariff lines below
     df_tariff = df_main[df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     df_main   = df_main[~df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     df_tariff['Line No'] = ''
-
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
     df['Line No'] = pd.to_numeric(df['Line No'], errors='coerce')
     df = df[(df['Line No'].fillna(0) >= 0) & (df['Line No'].fillna(0) <= 5000)]
