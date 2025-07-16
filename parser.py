@@ -122,6 +122,9 @@ def parse_po(file):
 
     return df
 
+import pdfplumber
+import pandas as pd
+import re
 
 def parse_oa(file):
     data = []
@@ -242,7 +245,7 @@ def parse_oa(file):
         calib_details = ", ".join(calib_parts)
 
         data.append({
-            'Line No': line_no,
+            'Line No': line_no.strip() if line_no else '',
             'Model Number': model.group(1) if model else '',
             'Ship Date': ship_date.group(1) if ship_date else '',
             'Qty': qty,
@@ -257,35 +260,21 @@ def parse_oa(file):
 
     df = pd.DataFrame(data)
 
-    # Duplicate rows if 'Line No' contains a slash (e.g. '00030/00040')
-    new_rows = []
+    # ✅ DUPLICATE rows like '00030/00040' into two lines with same data
+    duplicated_rows = []
     for _, row in df.iterrows():
         raw_line_no = str(row['Line No']).strip()
         if '/' in raw_line_no:
-            split_nos = [part.strip() for part in raw_line_no.split('/') if part.strip()]
-            for num in split_nos:
+            split_line_nos = [part.strip() for part in raw_line_no.split('/') if part.strip()]
+            for part in split_line_nos:
                 new_row = row.copy()
-                new_row['Line No'] = num
-                new_rows.append(new_row)
+                new_row['Line No'] = part
+                duplicated_rows.append(new_row)
         else:
-            new_rows.append(row)
-    
-    df = pd.DataFrame(new_rows)
+            duplicated_rows.append(row)
+    df = pd.DataFrame(duplicated_rows)
 
-    rows = []
-    for _, row in df.iterrows():
-        line_no = str(row['Line No'])
-        if '/' in line_no:
-            parts = [p.strip() for p in line_no.split('/') if p.strip()]
-            for p in parts:
-                new_row = row.copy()
-                new_row['Line No'] = p
-                rows.append(new_row)
-        else:
-            rows.append(row)
-
-    df = pd.DataFrame(rows)
-
+    # ✅ Append total row if found
     if order_total:
         order_total_row = {
             'Line No': '',
@@ -302,6 +291,7 @@ def parse_oa(file):
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
+    # ✅ Sorting and cleanup
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
@@ -311,7 +301,7 @@ def parse_oa(file):
     df_tariff['Line No'] = ''
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
 
-    # SAFE CLEANUP
+    # ✅ Final clean pass
     df['Line No'] = pd.to_numeric(df['Line No'], errors='coerce')
     df = df[(df['Line No'].fillna(0) >= 0) & (df['Line No'].fillna(0) <= 5000)]
     df = df[df['Model Number'].str.contains('[A-Za-z]', na=False)]
