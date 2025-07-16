@@ -135,7 +135,7 @@ def parse_oa(file):
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
+    blocks = re.split(r'\n\s*(0{2,}\d{2,}|\d+(\.\d+)*)(?=\s)', text)
 
     for i in range(1, len(blocks) - 1, 2):
         line_no = blocks[i]
