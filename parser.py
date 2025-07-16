@@ -131,19 +131,18 @@ import re
 def parse_oa(file):
     data = []
     order_total = ""
+    tariff_rows = []
 
-    # 1) Read entire PDF text
+    # 1) Read full PDF text
     with pdfplumber.open(file) as pdf:
         text = "\n".join(p.extract_text() or "" for p in pdf.pages)
 
-    # 2) 🔍 Tariff surcharge detection
-    tariff_rows = []
+    # 2) Extract any “TARIFF” surcharge lines (no 5-digit line number)
     for line in text.split('\n'):
-        if re.search(r'TARIFF', line, re.IGNORECASE):
+        if 'TARIFF' in line.upper():
             m = re.match(
                 r'\s*(?:\d+(?:\.\d+)?)\s+([A-Z0-9\-]*TARIFF[A-Z0-9\-]*)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})',
-                line,
-                re.IGNORECASE
+                line, re.IGNORECASE
             )
             if m:
                 tariff_rows.append({
@@ -159,10 +158,9 @@ def parse_oa(file):
                     'Calib Data?':   '',
                     'Calib Details': ''
                 })
-                # remove it so it won't fall into the 5-digit split logic
                 text = text.replace(line, "")
 
-    # 3) Extract & strip final total
+    # 3) Extract & remove final USD total
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
@@ -176,11 +174,20 @@ def parse_oa(file):
         line_nos    = [ln for ln in raw_line_no.split('/') if ln.strip()]
 
         for line_no in line_nos:
-            # — Model Number (first token) —
-            model_m = re.match(r'\s*([A-Z0-9\-_]+)', block)
-            model   = model_m.group(1) if model_m else ""
+            # — MODEL NUMBER: from the first non-empty line of the block —
+            lines = [l.strip() for l in block.split('\n') if l.strip()]
+            if lines:
+                first = lines[0]
+                m0 = re.match(r'([A-Z0-9\-_]+)', first)
+                model = m0.group(1) if m0 else ""
+            else:
+                model = ""
+            # fallback if that fails
+            if not model:
+                m1 = re.search(r'([A-Z0-9\-_]{6,})', block)
+                model = m1.group(1) if m1 else ""
 
-            # — Ship Date —
+            # — SHIP DATE —
             ship_date = ""
             sd = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
             if sd:
@@ -189,13 +196,11 @@ def parse_oa(file):
                 sd2 = re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block)
                 ship_date = sd2.group(1) if sd2 else ""
 
-            # — Qty, Unit Price, Total Price —
+            # — QTY / UNIT / TOTAL —
             qty = unit_price = total_price = ""
             m2 = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
-
-            lines = block.split('\n')
 
             # —— TAGS —— 
             tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
@@ -211,7 +216,6 @@ def parse_oa(file):
                 ok_len     = 5 <= len(t) <= 50
                 if not is_cve and has_let and has_dig and not all_dig and not looks_date and ok_len:
                     tags.append(t)
-            # enforce qty==1 → only first tag
             if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                 tags = tags[:1]
             has_tag = 'Y' if tags else 'N'
@@ -242,7 +246,6 @@ def parse_oa(file):
                         wire_configs.append(f"{code}-wire RTD")
                     for r in ranges:
                         calib_parts.append(f"{r} {unit_clean}".strip())
-            # fallback only if a WIRE line exists
             if not wire_configs and any('WIRE' in ln.upper() for ln in lines):
                 for w in re.findall(r'\s1([2-5])\s', block):
                     wire_configs.append(f"{w}-wire RTD")
@@ -268,35 +271,43 @@ def parse_oa(file):
                 'Calib Details': calib_details
             })
 
-    # 5) Append any surcharge rows we found
+    # 5) Append tariff rows
     data.extend(tariff_rows)
 
-    # 6) Build DataFrame and tack on ORDER TOTAL if present
+    # 6) Build DataFrame & append ORDER TOTAL if present
     df = pd.DataFrame(data)
     if order_total:
-        df = pd.concat([
-            df,
-            pd.DataFrame([{
-                'Line No':       '',
-                'Model Number':  'ORDER TOTAL',
-                'Ship Date':     '',
-                'Qty':           '',
-                'Unit Price':    '',
-                'Total Price':   order_total,
-                'Has Tag?':      '',
-                'Tags':          '',
-                'Wire-on Tag':   '',
-                'Calib Data?':   '',
-                'Calib Details':''
-            }])
-        ], ignore_index=True)
+        df = pd.concat([df, pd.DataFrame([{
+            'Line No':       '',
+            'Model Number':  'ORDER TOTAL',
+            'Ship Date':     '',
+            'Qty':           '',
+            'Unit Price':    '',
+            'Total Price':   order_total,
+            'Has Tag?':      '',
+            'Tags':          '',
+            'Wire-on Tag':   '',
+            'Calib Data?':   '',
+            'Calib Details':''
+        }])], ignore_index=True)
 
-    # 7) Final sorting & cleanup
+    # 7) Sort by numeric Line No without changing the stored values
     df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
-    df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
-    df_main = df_main.sort_values(by='Line No', ignore_index=True)
+    df_main = df_main.assign(
+        _sort=pd.to_numeric(df_main['Line No'], errors='coerce')
+    ).sort_values('_sort', ignore_index=True).drop(columns=['_sort'])
+
+    # 8) Remove any decimal formatting on Line No
+    def clean_line_no(x):
+        try:
+            n = float(x)
+            if n.is_integer():
+                return int(n)
+            return n
+        except:
+            return x
+    df_main['Line No'] = df_main['Line No'].apply(clean_line_no)
     df = pd.concat([df_main, df_total], ignore_index=True)
-    df = df.dropna(how='all').reset_index(drop=True)
 
     return df
