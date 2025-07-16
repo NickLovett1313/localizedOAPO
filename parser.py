@@ -205,8 +205,7 @@ def parse_oa(file):
             # helper for validating tags
             def valid_tag(p):
                 if not p: return False
-                tag_pat = re.compile(r'^[A-Z]{2,}-[A-Z0-9\-]{2,}$')
-                if not tag_pat.match(p): return False
+                if not re.match(r'^[A-Z]{2,}-[A-Z0-9\-]{2,}$', p): return False
                 if not re.search(r'[A-Z]', p) or not re.search(r'\d', p): return False
                 if re.fullmatch(r'[\d\-]+', p): return False
                 if re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', p): return False
@@ -216,24 +215,26 @@ def parse_oa(file):
             tags = []
             wire_on_tags = []
             if contains_tag_section:
-                # parse any line with slash (e.g. “LIT-00101 / IC0077-NC”)
-                for ln in lines_clean:
-                    if '/' in ln and not re.match(r'\s*WIRE', ln, re.IGNORECASE):
-                        for part in ln.split('/'):
-                            p = part.strip()
-                            if cust_po and (p == cust_po or p.startswith(cust_po)): continue
-                            if valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
-                                tags.append(p)
-                # parse wire-on tags similarly
+                # collect slash-based tags
+                slash_lines = [ln for ln in lines_clean if '/' in ln and not re.match(r'\s*WIRE', ln)]
+                for ln in slash_lines:
+                    parts = [p.strip() for p in ln.split('/')]
+                    for p in parts:
+                        if cust_po and (p == cust_po or p.startswith(cust_po)): continue
+                        if valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
+                            tags.append(p)
+
+                # wire-on tags
                 for idx, ln in enumerate(lines_clean):
                     if 'WIRE' in ln.upper() and idx + 1 < len(lines_clean):
-                        for part in lines_clean[idx+1].split('/'):
-                            p = part.strip()
+                        for p in lines_clean[idx+1].split('/'):
+                            p = p.strip()
                             if cust_po and (p == cust_po or p.startswith(cust_po)): continue
                             if valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
                                 wire_on_tags.append(p)
-                # enforce qty==1 → only first tag
-                if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
+
+                # enforce qty==1 only when no slash-based tags
+                if not slash_lines and qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                     tags = tags[:1]
 
             has_tag = 'Y' if tags else 'N'
@@ -306,5 +307,4 @@ def parse_oa(file):
         ignore_index=True
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
-
     return df
