@@ -20,7 +20,7 @@ def parse_po(file):
         line_no = blocks[i]
         block = blocks[i+1]
 
-        model = re.search(r'([A-Z0-9\-]{6,})', block)
+        model = re.search(r'([A-Z0-9\-_]{6,})', block)
         ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
         qty, unit_price, total_price = '', '', ''
@@ -153,7 +153,7 @@ def parse_oa(file):
             except:
                 line_no = ''
 
-        model = re.search(r'([A-Z0-9\-]{6,})', block)
+        model = re.search(r'([A-Z0-9\-_]{6,})', block)
         ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
         if not ship_date:
             ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
@@ -294,7 +294,7 @@ def parse_oa(file):
     df_tariff['Line No'] = ''
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
 
-    # ✅ SAFE CLEANUP FIX
+    # SAFE CLEANUP
     df['Line No'] = pd.to_numeric(df['Line No'], errors='coerce')
     df = df[(df['Line No'].fillna(0) >= 0) & (df['Line No'].fillna(0) <= 5000)]
     df = df[df['Model Number'].str.contains('[A-Za-z]', na=False)]
