@@ -147,22 +147,28 @@ def parse_oa(file):
         raw_line_no = blocks[i].strip()
         block = blocks[i + 1]
 
-        # Pull out the Customer PO No early so we can strip it before tag detection
-        cp_match = re.search(r'Customer PO No[:\s]+([A-Z0-9\-]+)', block, re.IGNORECASE)
+        # Extract Customer PO (handles “Customer PO:” or “Customer PO No:”)
+        cp_match = re.search(r'Customer PO(?: No)?\s*[:]\s*([A-Z0-9\-]+)', block, re.IGNORECASE)
         cust_po = cp_match.group(1).strip() if cp_match else None
-        tag_block = block.replace(cust_po, "") if cust_po else block
+
+        # Remove that Customer-PO string from tag_block so it won’t ever match
+        tag_block = block
+        if cust_po:
+            tag_block = re.sub(re.escape(cust_po), '', tag_block)
 
         # Handle slash-separated line numbers
         line_nos = [ln for ln in raw_line_no.split('/') if ln.strip()]
 
         for line_no in line_nos:
-            # Model and ship-date
+            # Model number
             model = re.search(r'([A-Z0-9\-_]{6,})', block)
+
+            # Ship date
             ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
             if not ship_date:
                 ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
-            # Quantity, unit-price, total-price
+            # Qty / Unit / Total prices
             qty = unit_price = total_price = ""
             m = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
             if m:
@@ -174,10 +180,9 @@ def parse_oa(file):
             tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block)
             tags = []
             for t in tags_found:
-                # never treat the Customer PO No (or any longer variant) as a tag
-                if cust_po and (t == cust_po or t.startswith(cust_po) or cust_po.startswith(t)):
+                # never treat the Customer PO as a tag
+                if cust_po and t == cust_po:
                     continue
-                # original filters
                 is_model    = model and t == model.group(1)
                 is_cve      = 'CVE' in t or 'TSE' in t
                 has_letters = bool(re.search(r'[A-Z]', t))
@@ -193,10 +198,10 @@ def parse_oa(file):
                 if not is_model and not is_cve and has_letters and has_digits and not is_all_dig and not is_date and good_len:
                     tags.append(t)
 
-            # preserve insertion order and dedupe
+            # Dedupe while preserving order
             tags = list(dict.fromkeys(tags))
 
-            # enforce qty-rule: if qty == 1, only allow one tag
+            # Enforce qty rule: if qty == 1, keep only one tag
             if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                 tags = tags[:1]
 
@@ -208,9 +213,7 @@ def parse_oa(file):
                 if 'WIRE' in line.upper() and idx + 1 < len(lines):
                     for p in lines[idx + 1].split('/'):
                         p = p.strip()
-                        if not p:
-                            continue
-                        if p in tags or re.match(r'^[A-Z0-9]{2,}-[A-Z0-9\-]{2,}$', p):
+                        if p and (p in tags or re.match(r'^[A-Z0-9]{2,}-[A-Z0-9\-]{2,}$', p)):
                             wire_on_tags.append(p)
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
@@ -231,7 +234,7 @@ def parse_oa(file):
                     for r in ranges:
                         calib_parts.append(f"{r} {unit_clean}".strip())
 
-            # fallback wire count search
+            # Fallback wire-count search
             if not wire_configs:
                 for m in re.findall(r'\s1([2-5])\s', block):
                     wire_configs.append(f"{m}-wire RTD")
@@ -257,7 +260,7 @@ def parse_oa(file):
                 'Calib Details': calib_details
             })
 
-    # build DataFrame and append ORDER TOTAL if present
+    # Build DataFrame and append ORDER TOTAL row if present
     df = pd.DataFrame(data)
     if order_total:
         df = pd.concat([
@@ -277,15 +280,16 @@ def parse_oa(file):
             }])
         ], ignore_index=True)
 
-    # final sort, tariff grouping, and cleanup
+    # Final sorting, tariff grouping, and cleanup
     df_main   = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total  = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
-    df_main = df_main.sort_values(by='Line No', ignore_index=True)
+    df_main   = df_main.sort_values(by='Line No', ignore_index=True)
     df_tariff = df_main[df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     df_main   = df_main[~df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     df_tariff['Line No'] = ''
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
+
     df['Line No'] = pd.to_numeric(df['Line No'], errors='coerce')
     df = df[(df['Line No'].fillna(0) >= 0) & (df['Line No'].fillna(0) <= 5000)]
     df = df[df['Model Number'].str.contains('[A-Za-z]', na=False)]
