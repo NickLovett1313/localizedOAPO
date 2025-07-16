@@ -136,6 +136,10 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join(p.extract_text() or "" for p in pdf.pages)
 
+    # 1a) Extract the Customer PO number so we never treat it as a tag
+    cp_matches = re.findall(r'Customer PO(?: No)?\s*:\s*([A-Z0-9\-]+)', text, re.IGNORECASE)
+    cust_po = cp_matches[-1].strip() if cp_matches else None
+
     # 2) Minimal “TARIFF” surcharge detector (no 5-digit line #)
     for line in text.split('\n'):
         m = re.match(
@@ -157,7 +161,7 @@ def parse_oa(file):
                 'Calib Details':''
             })
 
-    # 3) Extract and remove the final total
+    # 3) Pull off the final total and trim it out
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
@@ -170,6 +174,8 @@ def parse_oa(file):
         block       = blocks[i + 1]
         line_nos    = [ln for ln in raw_line_no.split('/') if ln.strip()]
         lines       = block.split('\n')
+        # prepare a version of the block with the Customer PO removed
+        tag_block = block.replace(cust_po, " ") if cust_po else block
 
         for line_no in line_nos:
             # — Model Number: first 6+ char uppercase/digit string in block —
@@ -192,21 +198,33 @@ def parse_oa(file):
 
             # —— TAGS —— 
             tags = []
-            for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block):
+            for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block):
+                # never treat the Customer PO as a tag
+                if cust_po and (t == cust_po or t.startswith(cust_po) or cust_po.startswith(t)):
+                    continue
                 is_model     = (t == model)
                 is_cve       = 'CVE' in t or 'TSE' in t
                 has_letters  = bool(re.search(r'[A-Z]', t))
                 has_digits   = bool(re.search(r'\d', t))
                 is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
-                is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t))
+                is_date      = bool(
+                                  re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
+                               or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
+                               or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
+                )
                 good_len     = 5 <= len(t) <= 50
 
-                if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and good_len:
+                if (not is_model and not is_cve
+                    and has_letters and has_digits
+                    and not is_all_digits and not is_date
+                    and good_len):
                     tags.append(t)
+                # explicitly allow NC-tags
                 elif re.search(r'IC\d{2,5}-NC', t.upper()):
                     tags.append(t)
 
             tags = list(dict.fromkeys(tags))
+            # enforce qty == 1 → only first tag
             if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                 tags = tags[:1]
             has_tag = 'Y' if tags else 'N'
@@ -269,28 +287,30 @@ def parse_oa(file):
     # 6) Build DataFrame & append ORDER TOTAL row if present
     df = pd.DataFrame(data)
     if order_total:
-        df = pd.concat([df, pd.DataFrame([{
-            'Line No':       '',
-            'Model Number':  'ORDER TOTAL',
-            'Ship Date':     '',
-            'Qty':           '',
-            'Unit Price':    '',
-            'Total Price':   order_total,
-            'Has Tag?':      '',
-            'Tags':          '',
-            'Wire-on Tag':   '',
-            'Calib Data?':   '',
-            'Calib Details':''
-        }])], ignore_index=True)
+        df = pd.concat([
+            df,
+            pd.DataFrame([{
+                'Line No':       '',
+                'Model Number':  'ORDER TOTAL',
+                'Ship Date':     '',
+                'Qty':           '',
+                'Unit Price':    '',
+                'Total Price':   order_total,
+                'Has Tag?':      '',
+                'Tags':          '',
+                'Wire-on Tag':   '',
+                'Calib Data?':   '',
+                'Calib Details':''
+            }])
+        ], ignore_index=True)
 
     # 7) Final sort by Line No without mutating its format
-    df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
-    df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
+    df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
+    df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main = df_main.sort_values(
         by='Line No',
         key=lambda col: pd.to_numeric(col, errors='coerce'),
         ignore_index=True
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
-
     return df
