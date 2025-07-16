@@ -258,20 +258,25 @@ def parse_oa(file):
     df = pd.DataFrame(data)
 
     # Duplicate rows if 'Line No' contains a slash
-    duplicated_rows = []
+    new_rows = []
     for _, row in df.iterrows():
-        raw_line_no = str(row['Line No']).strip()
-        if '/' in raw_line_no:
-            split_nos = [num.strip() for num in raw_line_no.split('/') if num.strip()]
-            for num in split_nos:
+        line_no_raw = str(row['Line No']).strip()
+    
+        if '/' in line_no_raw:
+            # Split on slash and remove empty segments
+            split_line_nos = [part.strip() for part in line_no_raw.split('/') if part.strip()]
+    
+            # Duplicate the row for each line number
+            for line_no in split_line_nos:
                 new_row = row.copy()
-                new_row['Line No'] = num
-                duplicated_rows.append(new_row)
+                new_row['Line No'] = line_no
+                new_rows.append(new_row)
         else:
-            duplicated_rows.append(row)
+            new_rows.append(row)
     
-    df = pd.DataFrame(duplicated_rows)
-    
+    # Replace df with the duplicated version
+    df = pd.DataFrame(new_rows)
+
     rows = []
     for _, row in df.iterrows():
         line_no = str(row['Line No'])
