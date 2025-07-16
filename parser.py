@@ -154,7 +154,7 @@ def parse_oa(file):
                 'Tags':          '',
                 'Wire-on Tag':   '',
                 'Calib Data?':   '',
-                'Calib Details': ''
+                'Calib Details':''
             })
 
     # 3) Pull off the final total and trim it out
@@ -169,9 +169,7 @@ def parse_oa(file):
     for i in range(1, len(blocks) - 1, 2):
         raw_line_no = blocks[i].strip()
         block       = blocks[i + 1]
-
-        # break out each number if there's a slash
-        line_nos = [ln for ln in raw_line_no.split('/') if ln.strip()]
+        line_nos    = [ln for ln in raw_line_no.split('/') if ln.strip()]
 
         for line_no in line_nos:
             # model & ship date
@@ -189,7 +187,6 @@ def parse_oa(file):
             lines = block.split('\n')
 
             # —— TAGS —— 
-            tags = []
             def is_valid_tag(candidate):
                 if not candidate:
                     return False
@@ -203,14 +200,14 @@ def parse_oa(file):
                 not_date    = not re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', candidate)
                 return bool(has_letters and has_digits and has_dash and reasonable and not_date)
 
-            for idx, line in enumerate(lines):
+            tags = []
+            for line in lines:
                 parts = [p.strip() for p in line.split('/')] if '/' in line else [line.strip()]
                 for p in parts:
                     if is_valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
                         tags.append(p)
 
             tags = list(dict.fromkeys(tags))
-            # enforce qty==1 rule
             if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                 tags = tags[:1]
             has_tag = 'Y' if tags else 'N'
@@ -218,8 +215,8 @@ def parse_oa(file):
             # —— WIRE-ON TAGS —— 
             wire_on_tags = []
             for idx, line in enumerate(lines):
-                if 'WIRE' in line.upper() and idx+1 < len(lines):
-                    for p in lines[idx+1].split('/'):
+                if 'WIRE' in line.upper() and idx + 1 < len(lines):
+                    for p in lines[idx + 1].split('/'):
                         p = p.strip()
                         if is_valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
                             wire_on_tags.append(p)
@@ -232,11 +229,11 @@ def parse_oa(file):
                 if re.search(r'-?\d+\s*to\s*-?\d+', l):
                     ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
                     unit_clean = ""
-                    if idx+1 < len(lines):
+                    if idx + 1 < len(lines):
                         um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines[idx+1].upper())
                         if um:
                             unit_clean = um.group(0).strip().upper()
-                    if idx+2 < len(lines) and re.fullmatch(r'1[2-5]', lines[idx+2].strip()):
+                    if idx + 2 < len(lines) and re.fullmatch(r'1[2-5]', lines[idx+2].strip()):
                         wire_configs.append(f"{lines[idx+2].strip()[1]}-wire RTD")
                     for r in ranges:
                         calib_parts.append(f"{r} {unit_clean}".strip())
@@ -250,7 +247,7 @@ def parse_oa(file):
             calib_details = ", ".join(calib_parts)
 
             data.append({
-                'Line No':       int(line_no) if line_no.isdigit() else line_no,
+                'Line No':       line_no,
                 'Model Number':  model.group(1)    if model else '',
                 'Ship Date':     ship_date.group(1) if ship_date else '',
                 'Qty':           qty,
@@ -280,13 +277,16 @@ def parse_oa(file):
             'Tags':          '',
             'Wire-on Tag':   '',
             'Calib Data?':   '',
-            'Calib Details':''
+            'Calib Details': ''
         }])], ignore_index=True)
 
-    # 7) final sorting and return
-    df_main   = df[df['Model Number'] != 'ORDER TOTAL'].copy()
-    df_total  = df[df['Model Number'] == 'ORDER TOTAL'].copy()
-    df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
-    df_main = df_main.sort_values(by='Line No', ignore_index=True)
+    # 7) final sorting without mutating 'Line No'
+    df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
+    df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
+    df_main = df_main.sort_values(
+        by='Line No',
+        key=lambda col: pd.to_numeric(col, errors='coerce'),
+        ignore_index=True
+    )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
