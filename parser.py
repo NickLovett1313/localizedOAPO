@@ -293,4 +293,10 @@ def parse_oa(file):
     df_main = df_main[~df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     df_tariff['Line No'] = ''
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
+
+    # === NEW CLEANUP STEP ===
+    df = df[(df['Line No'].fillna(0) >= 0) & (df['Line No'].fillna(0) <= 5000)]
+    df = df[df['Model Number'].str.contains('[A-Za-z]', na=False)]
+    df = df.dropna(how='all').reset_index(drop=True)
+
     return df
