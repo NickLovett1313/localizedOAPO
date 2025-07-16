@@ -141,17 +141,9 @@ def parse_oa(file):
         line_no = blocks[i]
         block = blocks[i+1]
 
-        if '.' in line_no:
-            parts = line_no.split('.')
-            try:
-                line_no = int(parts[0]) * 10
-            except:
-                line_no = ''
-        else:
-            try:
-                line_no = int(line_no)
-            except:
-                line_no = ''
+        line_numbers = [line_no]
+        if '/' in line_no:
+            line_numbers = line_no.split('/')
 
         model = re.search(r'([A-Z0-9\-_]{6,})', block)
         ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
@@ -253,19 +245,32 @@ def parse_oa(file):
         calib_data = 'Y' if calib_parts else 'N'
         calib_details = ", ".join(calib_parts)
 
-        data.append({
-            'Line No': int(line_no) if line_no else '',
-            'Model Number': model.group(1) if model else '',
-            'Ship Date': ship_date.group(1) if ship_date else '',
-            'Qty': qty,
-            'Unit Price': unit_price,
-            'Total Price': total_price,
-            'Has Tag?': has_tag,
-            'Tags': ", ".join(tags) if tags else '',
-            'Wire-on Tag': ", ".join(wire_on_tags) if wire_on_tags else '',
-            'Calib Data?': calib_data,
-            'Calib Details': calib_details
-        })
+        for ln in line_numbers:
+            if '.' in ln:
+                parts = ln.split('.')
+                try:
+                    ln_val = int(parts[0]) * 10
+                except:
+                    ln_val = ''
+            else:
+                try:
+                    ln_val = int(ln)
+                except:
+                    ln_val = ''
+
+            data.append({
+                'Line No': ln_val,
+                'Model Number': model.group(1) if model else '',
+                'Ship Date': ship_date.group(1) if ship_date else '',
+                'Qty': qty,
+                'Unit Price': unit_price,
+                'Total Price': total_price,
+                'Has Tag?': has_tag,
+                'Tags': ", ".join(tags) if tags else '',
+                'Wire-on Tag': ", ".join(wire_on_tags) if wire_on_tags else '',
+                'Calib Data?': calib_data,
+                'Calib Details': calib_details
+            })
 
     df = pd.DataFrame(data)
 
