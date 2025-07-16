@@ -138,15 +138,15 @@ def parse_oa(file):
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
+    # Split on 5-digit line numbers, including slash-separated groups like "00030/00040"
+    blocks = re.split(r'\n(\d{5}(?:/\d{5})*)', text)
 
     for i in range(1, len(blocks) - 1, 2):
         raw_line_no = blocks[i].strip()
         block = blocks[i + 1]
 
-        line_nos = [raw_line_no]
-        if '/' in raw_line_no:
-            line_nos = [ln.strip() for ln in raw_line_no.split('/') if ln.strip()]
+        # Break out each number if there's a slash
+        line_nos = [ln for ln in raw_line_no.split('/') if ln.strip()]
 
         for line_no in line_nos:
             model = re.search(r'([A-Z0-9\-_]{6,})', block)
@@ -154,7 +154,7 @@ def parse_oa(file):
             if not ship_date:
                 ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
-            qty, unit_price, total_price = '', '', ''
+            qty = unit_price = total_price = ''
             line_match = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
             if line_match:
                 qty = line_match.group(2)
@@ -181,34 +181,21 @@ def parse_oa(file):
 
             for idx, line in enumerate(lines):
                 line_upper = line.upper().strip()
-                possible_tags = []
-                if '/' in line:
-                    parts = [p.strip() for p in line.split('/') if p.strip()]
-                    possible_tags.extend(parts)
-                else:
-                    possible_tags.append(line.strip())
-
-                for tag in possible_tags:
+                possible = line.strip().split('/') if '/' in line else [line.strip()]
+                for tag in possible:
                     if is_valid_tag(tag):
                         tags.append(tag)
                     elif re.search(r'IC\d{2,5}-NC', tag.upper()):
                         tags.append(tag)
 
-                if 'WIRE' in line_upper:
-                    if idx + 1 < len(lines):
-                        wire_candidate = lines[idx + 1].strip()
-                        if '/' in wire_candidate:
-                            parts = [p.strip() for p in wire_candidate.split('/') if p.strip()]
-                            for p in parts:
-                                if is_valid_tag(p):
-                                    wire_on_tags.append(p)
-                                elif re.search(r'IC\d{2,5}-NC', p.upper()):
-                                    wire_on_tags.append(p)
-                        else:
-                            if is_valid_tag(wire_candidate):
-                                wire_on_tags.append(wire_candidate)
-                            elif re.search(r'IC\d{2,5}-NC', wire_candidate.upper()):
-                                wire_on_tags.append(wire_candidate)
+                if 'WIRE' in line_upper and idx + 1 < len(lines):
+                    next_line = lines[idx + 1].strip()
+                    parts = next_line.split('/') if '/' in next_line else [next_line]
+                    for p in parts:
+                        if is_valid_tag(p):
+                            wire_on_tags.append(p)
+                        elif re.search(r'IC\d{2,5}-NC', p.upper()):
+                            wire_on_tags.append(p)
 
             tags = list(set(tags))
             wire_on_tags = list(set(wire_on_tags))
@@ -222,25 +209,20 @@ def parse_oa(file):
                     ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
                     unit_clean = ""
                     if idx + 1 < len(lines):
-                        unit_line = lines[idx + 1].strip().upper()
-                        unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
+                        unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
+                                                lines[idx + 1].upper())
                         if unit_match:
                             unit_clean = unit_match.group(0).strip().upper()
-                    if idx + 2 < len(lines):
-                        config_line = lines[idx + 2].strip()
-                        if re.fullmatch(r'1[2-5]', config_line):
-                            code = config_line[1]
-                            wire_configs.append(f"{code}-wire RTD")
+                    if idx + 2 < len(lines) and re.fullmatch(r'1[2-5]', lines[idx + 2].strip()):
+                        code = lines[idx + 2].strip()[1]
+                        wire_configs.append(f"{code}-wire RTD")
                     for r in ranges:
-                        if unit_clean:
-                            calib_parts.append(f"{r} {unit_clean}")
-                        else:
-                            calib_parts.append(r)
+                        calib_parts.append(f"{r} {unit_clean}".strip())
 
             if not wire_configs:
-                wire_match = re.findall(r'\s1([2-5])\s', block)
-                for m in wire_match:
+                for m in re.findall(r'\s1([2-5])\s', block):
                     wire_configs.append(f"{m}-wire RTD")
+
             wire_configs = list(set(wire_configs))
             if wire_configs:
                 calib_parts = wire_configs + calib_parts
@@ -256,8 +238,8 @@ def parse_oa(file):
                 'Unit Price': unit_price,
                 'Total Price': total_price,
                 'Has Tag?': has_tag,
-                'Tags': ", ".join(tags) if tags else '',
-                'Wire-on Tag': ", ".join(wire_on_tags) if wire_on_tags else '',
+                'Tags': ", ".join(tags),
+                'Wire-on Tag': ", ".join(wire_on_tags),
                 'Calib Data?': calib_data,
                 'Calib Details': calib_details
             })
@@ -280,6 +262,7 @@ def parse_oa(file):
         }
         df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
 
+    # final sorting and filtering
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
@@ -295,4 +278,5 @@ def parse_oa(file):
     df = df.dropna(how='all').reset_index(drop=True)
 
     return df
+
 
