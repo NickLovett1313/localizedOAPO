@@ -1,3 +1,7 @@
+import pdfplumber
+import pandas as pd
+import re
+
 def parse_po(file):
     data = []
     order_total = ""
@@ -118,180 +122,185 @@ def parse_po(file):
 
     return df
 
-import pdfplumber
-import pandas as pd
-import re
 
 def parse_oa(file):
     data = []
     order_total = ""
 
-    # Read full text from the OA PDF
     with pdfplumber.open(file) as pdf:
-        text = "\n".join(p.extract_text() for p in pdf.pages)
+        text = "\n".join([p.extract_text() for p in pdf.pages])
 
-    # Extract and strip off the 'Total (USD)' footer if present
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    # <<< UPDATED regex to capture slash-delimited line numbers as one group >>>
-    blocks = re.split(r'\n((?:\d+)(?:/\d+)*)', text)
+    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
 
-    # Iterate through the split blocks two at a time (line_no header, then block text)
     for i in range(1, len(blocks) - 1, 2):
-        raw_line_no = blocks[i].strip()
-        block      = blocks[i + 1]
+        line_no = blocks[i]
+        block = blocks[i+1]
 
-        # If there's a slash, split into separate line numbers
-        line_nos = [raw_line_no]
-        if '/' in raw_line_no:
-            line_nos = [ln.strip() for ln in raw_line_no.split('/') if ln.strip()]
+        model = re.search(r'([A-Z0-9\-_]{6,})', block)
+        ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
+        if not ship_date:
+            ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
-        # Process each resulting line number individually
-        for line_no in line_nos:
-            # Model number
-            model = re.search(r'([A-Z0-9\-_]{6,})', block)
+        qty, unit_price, total_price = '', '', ''
+        line_match = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+        if line_match:
+            qty = line_match.group(2)
+            unit_price = line_match.group(3)
+            total_price = line_match.group(4)
 
-            # Ship date: prefer 'Expected Ship Date: DD-MMM-YYYY' but fall back to 'MMM D, YYYY'
-            ship_date = re.search(r'Expected Ship Date: (\d{2}-[A-Za-z]{3}-\d{4})', block)
-            if not ship_date:
-                ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
+        lines = block.split('\n')
 
-            # Qty, unit price, total price
-            qty = unit_price = total_price = ""
-            line_match = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
-            if line_match:
-                qty         = line_match.group(2)
-                unit_price  = line_match.group(3)
-                total_price = line_match.group(4)
+        def is_valid_tag(candidate):
+            if not candidate:
+                return False
+            tag_pattern = re.compile(r'^[A-Z]{2,3}-[A-Z0-9\-]{2,}$')
+            if not tag_pattern.match(candidate):
+                return False
+            has_letters = re.search(r'[A-Z]', candidate)
+            has_digits = re.search(r'\d', candidate)
+            has_dash = '-' in candidate
+            is_reasonable_len = 4 <= len(candidate) <= 50
+            is_not_date = not re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', candidate)
+            return has_letters and has_digits and has_dash and is_reasonable_len and is_not_date
 
-            lines = block.split('\n')
+        tags = []
+        wire_on_tags = []
 
-            # Helper to validate tag candidates
-            def is_valid_tag(t):
-                if not t: return False
-                if not re.match(r'^[A-Z]{2,3}-[A-Z0-9\-]{2,}$', t): return False
-                if re.search(r'\d{1,2}-[A-Za-z]{3}-\d{4}', t): return False
-                has_letters = bool(re.search(r'[A-Z]', t))
-                has_digits  = bool(re.search(r'\d', t))
-                has_dash    = '-' in t
-                reasonable_len = 4 <= len(t) <= 50
-                return has_letters and has_digits and has_dash and reasonable_len
+        for idx, line in enumerate(lines):
+            line_upper = line.upper().strip()
 
-            tags = []
-            wire_on_tags = []
+            possible_tags = []
+            if '/' in line:
+                parts = [p.strip() for p in line.split('/') if p.strip()]
+                possible_tags.extend(parts)
+            else:
+                possible_tags.append(line.strip())
 
-            # Extract tags and wire-on tags
-            for idx, line in enumerate(lines):
-                line_up = line.upper().strip()
-                # Split by slash if present
-                pieces = [p.strip() for p in line.split('/') if p.strip()]
-                for p in pieces:
-                    if is_valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
-                        tags.append(p)
-                # Wire-on tags: the line after any line containing 'WIRE'
-                if 'WIRE' in line_up and idx + 1 < len(lines):
-                    next_pieces = [p.strip() for p in lines[idx+1].split('/') if p.strip()]
-                    for p in next_pieces:
-                        if is_valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
-                            wire_on_tags.append(p)
+            for tag in possible_tags:
+                if is_valid_tag(tag):
+                    tags.append(tag)
+                elif re.search(r'IC\d{2,5}-NC', tag.upper()):
+                    tags.append(tag)
 
-            tags = list(set(tags))
-            wire_on_tags = list(set(wire_on_tags))
-            has_tag = 'Y' if tags else 'N'
+            if 'WIRE' in line_upper:
+                if idx + 1 < len(lines):
+                    wire_candidate = lines[idx + 1].strip()
+                    if '/' in wire_candidate:
+                        parts = [p.strip() for p in wire_candidate.split('/') if p.strip()]
+                        for p in parts:
+                            if is_valid_tag(p):
+                                wire_on_tags.append(p)
+                            elif re.search(r'IC\d{2,5}-NC', p.upper()):
+                                wire_on_tags.append(p)
+                    else:
+                        if is_valid_tag(wire_candidate):
+                            wire_on_tags.append(wire_candidate)
+                        elif re.search(r'IC\d{2,5}-NC', wire_candidate.upper()):
+                            wire_on_tags.append(wire_candidate)
 
-            # Calibration data and details
-            calib_parts = []
-            wire_configs = []
+        tags = list(set(tags))
+        wire_on_tags = list(set(wire_on_tags))
+        has_tag = 'Y' if tags else 'N'
 
-            for idx, l in enumerate(lines):
-                # Ranges like "-50 to 150"
-                if re.search(r'-?\d+\s*to\s*-?\d+', l):
-                    ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
-                    # Unit line, e.g. "DEG C" or "KPA"
-                    unit_clean = ""
-                    if idx + 1 < len(lines):
-                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines[idx+1].upper())
-                        if um:
-                            unit_clean = um.group(0).strip().upper()
-                    # Config line for wire count (e.g. "12")
-                    if idx + 2 < len(lines) and re.fullmatch(r'1[2-5]', lines[idx+2].strip()):
-                        code = lines[idx+2].strip()[1]
+        calib_parts = []
+        wire_configs = []
+
+        for idx, l in enumerate(lines):
+            if re.search(r'-?\d+\s*to\s*-?\d+', l):
+                ranges = re.findall(r'-?\d+\s*to\s*-?\d+', l)
+                unit_clean = ""
+                if idx + 1 < len(lines):
+                    unit_line = lines[idx + 1].strip().upper()
+                    unit_match = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', unit_line)
+                    if unit_match:
+                        unit_clean = unit_match.group(0).strip().upper()
+                if idx + 2 < len(lines):
+                    config_line = lines[idx + 2].strip()
+                    if re.fullmatch(r'1[2-5]', config_line):
+                        code = config_line[1]
                         wire_configs.append(f"{code}-wire RTD")
-                    # Build detail entries
-                    for r in ranges:
-                        calib_parts.append(f"{r} {unit_clean}".strip())
+                for r in ranges:
+                    if unit_clean:
+                        calib_parts.append(f"{r} {unit_clean}")
+                    else:
+                        calib_parts.append(r)
 
-            # Fallback wire configs if none found above
-            if not wire_configs:
-                for m in re.findall(r'\s1([2-5])\s', block):
-                    wire_configs.append(f"{m}-wire RTD")
+        if not wire_configs:
+            wire_match = re.findall(r'\s1([2-5])\s', block)
+            for m in wire_match:
+                wire_configs.append(f"{m}-wire RTD")
+        wire_configs = list(set(wire_configs))
+        if wire_configs:
+            calib_parts = wire_configs + calib_parts
 
-            wire_configs = list(set(wire_configs))
-            if wire_configs:
-                calib_parts = wire_configs + calib_parts
+        calib_data = 'Y' if calib_parts else 'N'
+        calib_details = ", ".join(calib_parts)
 
-            calib_data    = 'Y' if calib_parts else 'N'
-            calib_details = ", ".join(calib_parts)
+        data.append({
+            'Line No': line_no,
+            'Model Number': model.group(1) if model else '',
+            'Ship Date': ship_date.group(1) if ship_date else '',
+            'Qty': qty,
+            'Unit Price': unit_price,
+            'Total Price': total_price,
+            'Has Tag?': has_tag,
+            'Tags': ", ".join(tags) if tags else '',
+            'Wire-on Tag': ", ".join(wire_on_tags) if wire_on_tags else '',
+            'Calib Data?': calib_data,
+            'Calib Details': calib_details
+        })
 
-            # Append row for this line_no
-            data.append({
-                'Line No':       line_no,
-                'Model Number':  model.group(1) if model else '',
-                'Ship Date':     ship_date.group(1) if ship_date else '',
-                'Qty':           qty,
-                'Unit Price':    unit_price,
-                'Total Price':   total_price,
-                'Has Tag?':      has_tag,
-                'Tags':          ", ".join(tags),
-                'Wire-on Tag':   ", ".join(wire_on_tags),
-                'Calib Data?':   calib_data,
-                'Calib Details': calib_details
-            })
-
-    # Build final DataFrame
     df = pd.DataFrame(data)
 
-    # Re-append order total row if found
-    if order_total:
-        df = pd.concat([
-            df,
-            pd.DataFrame([{
-                'Line No':       '',
-                'Model Number':  'ORDER TOTAL',
-                'Ship Date':     '',
-                'Qty':           '',
-                'Unit Price':    '',
-                'Total Price':   order_total,
-                'Has Tag?':      '',
-                'Tags':          '',
-                'Wire-on Tag':   '',
-                'Calib Data?':   '',
-                'Calib Details': ''
-            }])
-        ], ignore_index=True)
+    # NEW: Duplicate rows with slashes in Line No
+    rows = []
+    for _, row in df.iterrows():
+        line_no = str(row['Line No'])
+        if '/' in line_no:
+            parts = [p.strip() for p in line_no.split('/') if p.strip()]
+            for p in parts:
+                new_row = row.copy()
+                new_row['Line No'] = p
+                rows.append(new_row)
+        else:
+            rows.append(row)
 
-    # Clean, sort, and filter as before
+    df = pd.DataFrame(rows)
+
+    if order_total:
+        order_total_row = {
+            'Line No': '',
+            'Model Number': 'ORDER TOTAL',
+            'Ship Date': '',
+            'Qty': '',
+            'Unit Price': '',
+            'Total Price': order_total,
+            'Has Tag?': '',
+            'Tags': '',
+            'Wire-on Tag': '',
+            'Calib Data?': '',
+            'Calib Details': ''
+        }
+        df = pd.concat([df, pd.DataFrame([order_total_row])], ignore_index=True)
+
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
-
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
-
-    # Separate tariff lines and append them
     df_tariff = df_main[df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
-    df_main   = df_main[~df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
+    df_main = df_main[~df_main['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     df_tariff['Line No'] = ''
-
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
-    df['Line No'] = pd.to_numeric(df['Line No'], errors='coerce')
 
-    # Final filters
+    # SAFE CLEANUP
+    df['Line No'] = pd.to_numeric(df['Line No'], errors='coerce')
     df = df[(df['Line No'].fillna(0) >= 0) & (df['Line No'].fillna(0) <= 5000)]
     df = df[df['Model Number'].str.contains('[A-Za-z]', na=False)]
     df = df.dropna(how='all').reset_index(drop=True)
 
     return df
-
