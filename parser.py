@@ -190,7 +190,6 @@ def parse_oa(file):
 
             # —— TAGS —— 
             tags = []
-            # reuse original is_valid_tag logic
             def is_valid_tag(candidate):
                 if not candidate:
                     return False
@@ -205,7 +204,6 @@ def parse_oa(file):
                 return bool(has_letters and has_digits and has_dash and reasonable and not_date)
 
             for idx, line in enumerate(lines):
-                # split on slashes
                 parts = [p.strip() for p in line.split('/')] if '/' in line else [line.strip()]
                 for p in parts:
                     if is_valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
@@ -223,7 +221,7 @@ def parse_oa(file):
                 if 'WIRE' in line.upper() and idx+1 < len(lines):
                     for p in lines[idx+1].split('/'):
                         p = p.strip()
-                        if (is_valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper())):
+                        if is_valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
                             wire_on_tags.append(p)
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
@@ -252,7 +250,7 @@ def parse_oa(file):
             calib_details = ", ".join(calib_parts)
 
             data.append({
-                'Line No':       line_no,
+                'Line No':       int(line_no) if line_no.isdigit() else line_no,
                 'Model Number':  model.group(1)    if model else '',
                 'Ship Date':     ship_date.group(1) if ship_date else '',
                 'Qty':           qty,
@@ -292,4 +290,3 @@ def parse_oa(file):
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
-
