@@ -294,7 +294,8 @@ def parse_oa(file):
     df_tariff['Line No'] = ''
     df = pd.concat([df_main, df_tariff, df_total], ignore_index=True)
 
-    # === NEW CLEANUP STEP ===
+    # ✅ SAFE CLEANUP FIX
+    df['Line No'] = pd.to_numeric(df['Line No'], errors='coerce')
     df = df[(df['Line No'].fillna(0) >= 0) & (df['Line No'].fillna(0) <= 5000)]
     df = df[df['Model Number'].str.contains('[A-Za-z]', na=False)]
     df = df.dropna(how='all').reset_index(drop=True)
