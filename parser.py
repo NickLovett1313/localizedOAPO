@@ -136,16 +136,14 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join(p.extract_text() or "" for p in pdf.pages)
 
-    # 1a) Extract Customer PO to exclude from tags
+    # 1a) Extract the Customer PO so it’s never treated as a tag
     cp_matches = re.findall(r'Customer PO(?: No)?\s*:\s*([A-Z0-9\-]+)', text, re.IGNORECASE)
     cust_po = cp_matches[-1].strip() if cp_matches else None
 
     # 2) Minimal “TARIFF” surcharge detector
     for line in text.split('\n'):
-        m = re.match(
-            r'\s*\d+\.\d+\s+([A-Z0-9\-]*TARIFF[A-Z0-9\-]*)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})',
-            line, re.IGNORECASE
-        )
+        m = re.match(r'\s*\d+\.\d+\s+([A-Z0-9\-]*TARIFF[A-Z0-9\-]*)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})',
+                     line, re.IGNORECASE)
         if m:
             tariff_rows.append({
                 'Line No':       '',
@@ -167,26 +165,33 @@ def parse_oa(file):
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by 5-digit OA line numbers
+    # 4) Split into blocks by 5-digit OA line numbers (including slash-groups)
     blocks = re.split(r'\n(\d{5}(?:/\d{5})*)', text)
     for i in range(1, len(blocks) - 1, 2):
         raw_line_no = blocks[i].strip()
         block       = blocks[i + 1]
 
-        # filter valid line numbers 1–2000
-        line_nos = [ln for ln in raw_line_no.split('/') if ln.isdigit() and 1 <= int(ln) <= 2000]
+        # filter line numbers to those 1–2000
+        line_nos = []
+        for ln in raw_line_no.split('/'):
+            ln = ln.strip()
+            if ln.isdigit() and 1 <= int(ln) <= 2000:
+                line_nos.append(ln)
         if not line_nos:
             continue
 
-        # prepare for tag logic
+        # prepare for tag detection
+        tag_block = block.replace(cust_po, " ") if cust_po else block
         contains_tag_section = bool(re.search(r'\bTag\b', block, re.IGNORECASE))
+
+        # split lines once for reuse
         lines = block.split('\n')
         lines_clean = [l.strip() for l in lines if l.strip()]
 
         for line_no in line_nos:
-            # — Model Number: first 6+ char uppercase/digit token with a letter —
-            m_mod = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
-            model = m_mod.group(0) if m_mod else ""
+            # — Model Number: first 6+ char uppercase/digit token with at least one letter —
+            model_m = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
+            model   = model_m.group(0) if model_m else ""
 
             # — Ship Date —
             sd = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
@@ -202,62 +207,62 @@ def parse_oa(file):
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-            # helper for validating tags
-            def valid_tag(p):
-                if not p: return False
-                if not re.match(r'^[A-Z]{2,}-[A-Z0-9\-]{2,}$', p): return False
-                if not re.search(r'[A-Z]', p) or not re.search(r'\d', p): return False
-                if re.fullmatch(r'[\d\-]+', p): return False
-                if re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', p): return False
-                return 4 <= len(p) <= 50
-
-            # —— TAGS and WIRE-ON TAGS —— only if “Tag” appears
+            # —— TAGS —— only if the block actually labels a Tag section
             tags = []
             wire_on_tags = []
             if contains_tag_section:
-                # collect slash-based tags
-                slash_lines = [ln for ln in lines_clean if '/' in ln and not re.match(r'\s*WIRE', ln)]
-                for ln in slash_lines:
-                    parts = [p.strip() for p in ln.split('/')]
-                    for p in parts:
-                        if cust_po and (p == cust_po or p.startswith(cust_po)): continue
-                        if valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
-                            tags.append(p)
+                for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block):
+                    if cust_po and (t == cust_po or t.startswith(cust_po)):
+                        continue
+                    is_model     = (t == model)
+                    is_cve       = 'CVE' in t or 'TSE' in t
+                    has_letters  = bool(re.search(r'[A-Z]', t))
+                    has_digits   = bool(re.search(r'\d', t))
+                    is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
+                    is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t))
+                    ok_len       = 5 <= len(t) <= 50
 
-                # wire-on tags
+                    if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and ok_len:
+                        tags.append(t)
+                    elif re.search(r'IC\d{2,5}-NC', t.upper()):
+                        tags.append(t)
+
+                # wire-on tags also only if Tag section present
                 for idx, ln in enumerate(lines_clean):
                     if 'WIRE' in ln.upper() and idx + 1 < len(lines_clean):
-                        for p in lines_clean[idx+1].split('/'):
+                        for p in lines_clean[idx + 1].split('/'):
                             p = p.strip()
-                            if cust_po and (p == cust_po or p.startswith(cust_po)): continue
-                            if valid_tag(p) or re.search(r'IC\d{2,5}-NC', p.upper()):
+                            if p and (p in tags or re.search(r'IC\d{2,5}-NC', p.upper())):
                                 wire_on_tags.append(p)
 
-                # enforce qty==1 only when no slash-based tags
-                if not slash_lines and qty.isdigit() and int(qty) == 1 and len(tags) > 1:
+                # enforce qty==1 → only first tag
+                if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                     tags = tags[:1]
 
             has_tag = 'Y' if tags else 'N'
 
-            # —— CALIBRATION / CONFIG —— unchanged
+            # —— CALIBRATION / CONFIG —— unaffected
             calib_parts  = []
             wire_configs = []
             for idx, ln in enumerate(lines_clean):
                 if re.search(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln):
                     ranges = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln)
                     unit_clean = ""
-                    if idx+1 < len(lines_clean):
-                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines_clean[idx+1].upper())
+                    if idx + 1 < len(lines_clean):
+                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines_clean[idx + 1].upper())
                         if um:
                             unit_clean = um.group(0).strip().upper()
-                    if idx+2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx+2].strip()):
-                        code = lines_clean[idx+2].strip()[1]
+                    if idx + 2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx + 2].strip()):
+                        code = lines_clean[idx + 2].strip()[1]
                         wire_configs.append(f"{code}-wire RTD")
                     for r in ranges:
                         calib_parts.append(f"{r} {unit_clean}".strip())
+
             if not wire_configs and any('WIRE' in ln.upper() for ln in lines_clean):
                 for w in re.findall(r'\s1([2-5])\s', block):
                     wire_configs.append(f"{w}-wire RTD")
+
+            wire_configs = list(dict.fromkeys(wire_configs))
             if wire_configs:
                 calib_parts = wire_configs + calib_parts
 
@@ -281,7 +286,7 @@ def parse_oa(file):
     # 5) Append surcharge rows
     data.extend(tariff_rows)
 
-    # 6) Build DataFrame & append ORDER TOTAL if present
+    # 6) Build DataFrame & append ORDER TOTAL
     df = pd.DataFrame(data)
     if order_total:
         df = pd.concat([df, pd.DataFrame([{
@@ -298,7 +303,7 @@ def parse_oa(file):
             'Calib Details':''
         }])], ignore_index=True)
 
-    # 7) Final sort by Line No without mutating its format
+    # 7) Final sort without changing 'Line No'
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main = df_main.sort_values(
@@ -308,3 +313,4 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
