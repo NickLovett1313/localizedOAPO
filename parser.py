@@ -131,7 +131,7 @@ def parse_oa(file):
     order_total = ""
 
     with pdfplumber.open(file) as pdf:
-        text = "\n".join([p.extract_text() for p in pdf.pages])
+        text = "\n".join(p.extract_text() for p in pdf.pages)
 
     # pull off the final total and trim it out
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
@@ -145,7 +145,12 @@ def parse_oa(file):
     for i in range(1, len(blocks) - 1, 2):
         raw_line_no = blocks[i].strip()
         block = blocks[i + 1]
-        # if there's a slash, we'll emit one row per number
+
+        # extract Customer PO No once, to exclude from tags
+        cp_match = re.search(r'Customer PO No[:\s]+([A-Z0-9\-]+)', block, re.IGNORECASE)
+        cust_po = cp_match.group(1).strip() if cp_match else None
+
+        # if there's a slash in the line number, we'll emit one row per number
         line_nos = [ln for ln in raw_line_no.split('/') if ln.strip()]
 
         for line_no in line_nos:
@@ -169,6 +174,10 @@ def parse_oa(file):
             tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
             tags = []
             for t in tags_found:
+                # skip customer PO or any variant
+                if cust_po and (t == cust_po or t.startswith(cust_po) or cust_po.startswith(t)):
+                    continue
+                # original tag filters
                 is_model    = model and t == model.group(1)
                 is_cve      = 'CVE' in t or 'TSE' in t
                 has_letters = bool(re.search(r'[A-Z]', t))
@@ -179,19 +188,11 @@ def parse_oa(file):
                     or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
                     or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
                 )
-                good_len    = 5 <= len(t) <= 30
+                good_len    = 5 <= len(t) <= 50
 
                 if not is_model and not is_cve and has_letters and has_digits and not is_all_dig and not is_date and good_len:
                     tags.append(t)
-
             tags = list(set(tags))
-
-            # Exclude the Customer PO number if it was picked up
-            cp_match = re.search(r'Customer PO No[:\s]+([A-Z0-9-]+)', block, re.IGNORECASE)
-            if cp_match:
-                cust_po = cp_match.group(1).strip()
-                tags = [t for t in tags if t != cust_po]
-
             has_tag = 'Y' if tags else 'N'
 
             # —— WIRE-ON TAGS —— 
@@ -285,4 +286,3 @@ def parse_oa(file):
     df = df.dropna(how='all').reset_index(drop=True)
 
     return df
-
