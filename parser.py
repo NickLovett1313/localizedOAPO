@@ -10,36 +10,35 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join([p.extract_text() or "" for p in pdf.pages])
 
-    # 2) Extract the USD order total (but don’t crop yet)
+    # 2) Extract the USD order total
     stop_match = re.search(r'Order total.*?\$?USD.*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
 
-    # 3) Crop at the Spartan GST# line if present; otherwise at the USD-total marker
+    # 3) Crop at Spartan GST# or Order Total line
     gst_match = re.search(r'SPARTAN.*?GST#.*', text, re.IGNORECASE)
     if gst_match:
-        # include the GST# line itself
         pos = text.lower().find(gst_match.group(0).lower()) + len(gst_match.group(0))
         text = text[:pos]
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by PO “line numbers” (or stray floats)
-    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
+    # 4) Fix: Line splitter now captures 4–5 digit line numbers with optional leading zeroes
+    blocks = re.split(r'\n(0*\d{4,5})', text)
 
     for i in range(1, len(blocks) - 1, 2):
         raw_ln = blocks[i].strip()
         block  = blocks[i + 1]
 
-        # 5) Only keep lines numbered 1–10000
+        # 5) Parse line number as int
         if raw_ln.isdigit():
             ln = int(raw_ln)
-            if not (1 <= ln <= 10000):
+            if ln <= 0:
                 continue
         else:
             continue
 
-        # 6) Extract fields as before
+        # 6) Extract fields
         model     = re.search(r'([A-Z0-9\-_]{6,})', block)
         ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
@@ -48,25 +47,25 @@ def parse_po(file):
         if m:
             qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-        # 7) Tag logic (unchanged)
+        # 7) Tag logic
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
         for t in tags_found:
-            is_model     = model and t == model.group(1)
-            is_cve       = 'CVE' in t or 'TSE' in t
-            has_letters  = bool(re.search(r'[A-Z]', t))
-            has_digits   = bool(re.search(r'\d', t))
-            is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
-            is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
-                              or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
-                              or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t))
-            ok_len       = 5 <= len(t) <= 30
+            is_model      = model and t == model.group(1)
+            is_cve        = 'CVE' in t or 'TSE' in t
+            has_letters   = bool(re.search(r'[A-Z]', t))
+            has_digits    = bool(re.search(r'\d', t))
+            is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
+            is_date       = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
+                               or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
+                               or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t))
+            ok_len        = 5 <= len(t) <= 30
             if not (is_model or is_cve or is_all_digits or is_date) and has_letters and has_digits and ok_len:
                 tags.append(t)
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # 8) Calibration logic (unchanged)
+        # 8) Calibration logic
         calib_parts  = []
         wire_configs = []
         for line in block.split('\n'):
@@ -89,7 +88,7 @@ def parse_po(file):
         calib_data    = 'Y' if calib_parts else 'N'
         calib_details = ", ".join(calib_parts)
 
-        # 9) Append row
+        # 9) Append parsed row
         data.append({
             'Line No':       ln,
             'Model Number':  model.group(1) if model else '',
@@ -118,7 +117,7 @@ def parse_po(file):
             'Tags':          '',
             'Wire-on Tag':   '',
             'Calib Data?':   '',
-            'Calib Details':''
+            'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
@@ -130,6 +129,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
 import pdfplumber
 import pandas as pd
