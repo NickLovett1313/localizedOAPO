@@ -23,26 +23,19 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Updated line splitter (handles up to 5-digit lines with optional leading zeroes)
+    # 4) Updated line splitter
     blocks = re.split(r'\n(0*\d{4,5})', text)
 
     for i in range(1, len(blocks) - 1, 2):
         raw_ln = blocks[i].strip()
         block  = blocks[i + 1]
 
-        # 5) Parse line number and apply new validation
-        if raw_ln.isdigit():
-            ln = int(raw_ln)
-            if ln <= 0 or ln > 10000:
-                continue
-        else:
+        if not raw_ln.isdigit():
+            continue
+        ln = int(raw_ln)
+        if ln <= 0:
             continue
 
-        # 6) Must have quantity + price info or skip
-        if not re.search(r'\d+\s+EA\s+[\d,]+\.\d{2}\s+[\d,]+\.\d{2}', block):
-            continue
-
-        # 7) Extract fields
         model     = re.search(r'([A-Z0-9\-_]{6,})', block)
         ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
 
@@ -51,10 +44,10 @@ def parse_po(file):
         if m:
             qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-        # 8) Tag logic
+        model_str = model.group(1) if model else ''
+
         tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
         tags = []
-        model_str = model.group(1) if model else ''
         for t in tags_found:
             is_model     = model_str and t == model_str
             is_cve       = 'CVE' in t or 'TSE' in t
@@ -70,7 +63,6 @@ def parse_po(file):
         tags = list(set(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # 9) Calibration logic
         calib_parts  = []
         wire_configs = []
         for line in block.split('\n'):
@@ -93,7 +85,6 @@ def parse_po(file):
         calib_data    = 'Y' if calib_parts else 'N'
         calib_details = ", ".join(calib_parts)
 
-        # 10) Append parsed row
         data.append({
             'Line No':       ln,
             'Model Number':  model_str,
@@ -108,10 +99,20 @@ def parse_po(file):
             'Calib Details': calib_details
         })
 
-    # 11) Build DataFrame & append ORDER TOTAL
+    # 10) Build DataFrame
     df = pd.DataFrame(data)
+
+    # 🔒 Hard Cleanup Step
+    df = df[
+        (pd.to_numeric(df['Line No'], errors='coerce') <= 10000) &
+        (df['Qty'].str.strip() != '') &
+        (df['Unit Price'].str.strip() != '') &
+        (df['Total Price'].str.strip() != '')
+    ].copy()
+
+    # 11) Append order total if present
     if order_total:
-        total_row = {
+        df = pd.concat([df, pd.DataFrame([{
             'Line No':       '',
             'Model Number':  'ORDER TOTAL',
             'Ship Date':     '',
@@ -123,8 +124,7 @@ def parse_po(file):
             'Wire-on Tag':   '',
             'Calib Data?':   '',
             'Calib Details': ''
-        }
-        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+        }])], ignore_index=True)
 
     # 12) Final sort
     df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
@@ -134,8 +134,6 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
-
-
 
 import pdfplumber
 import pandas as pd
