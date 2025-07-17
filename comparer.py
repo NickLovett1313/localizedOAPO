@@ -7,7 +7,7 @@ def compare_oa_po(po_df, oa_df):
     discrepancies = []
     date_mismatches = []
 
-    # Strip ORDER TOTAL rows
+    # Strip ORDER TOTAL rows only for group-level matching
     po_main = po_df[po_df['Model Number'] != 'ORDER TOTAL'].copy()
     oa_main = oa_df[oa_df['Model Number'] != 'ORDER TOTAL'].copy()
 
@@ -20,7 +20,12 @@ def compare_oa_po(po_df, oa_df):
     def clean_tags(val):
         return [t.strip() for t in val.split(',') if t.strip()] if isinstance(val, str) else []
 
-    for line in sorted(all_lines):
+    # Safe sort for mixed Line Nos (numbers and blanks)
+    def safe_sort_key(x):
+        s = str(x).strip()
+        return ("~" + s) if not s.isdigit() else s.zfill(5)
+
+    for line in sorted(all_lines, key=safe_sort_key):
         po_rows = po_groups.get_group(line) if line in po_groups.groups else None
         oa_rows = oa_groups.get_group(line) if line in oa_groups.groups else None
 
