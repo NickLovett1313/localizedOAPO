@@ -24,8 +24,8 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by PO “line numbers” (or stray floats)
-    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
+    # 4) Split into blocks by line numbers (up to 10000)
+    blocks = re.split(r'\n(\d+)(?=\s)', text)
 
     for i in range(1, len(blocks) - 1, 2):
         raw_ln = blocks[i].strip()
@@ -119,8 +119,7 @@ def parse_po(file):
             'Wire-on Tag':   '',
             'Calib Data?':   '',
             'Calib Details':''
-        }
-        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+        }    df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
     # 11) Final sort
     df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
@@ -130,6 +129,103 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
+import pdfplumber
+import pandas as pd
+import re
+
+def parse_oa(file):
+    data = []
+    order_total = ""
+    tariff_rows = []
+
+    # 1) Read full PDF text
+    with pdfplumber.open(file) as pdf:
+        text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+
+    # 1a) Extract the Customer PO so it’s never treated as a tag
+    cp_matches = re.findall(r'Customer PO(?: No)?\s*:\s*([A-Z0-9\-]+)', text, re.IGNORECASE)
+    cust_po = cp_matches[-1].strip() if cp_matches else None
+
+    # 2) Minimal “TARIFF” surcharge detector
+    for line in text.split('\n'):
+        m = re.match(r'\s*\d+\.\d+\s+([A-Z0-9\-]*TARIFF[A-Z0-9\-]*)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})',
+                     line, re.IGNORECASE)
+        if m:
+            tariff_rows.append({
+                'Line No':       '',
+                'Model Number':  m.group(1),
+                'Ship Date':     '',
+                'Qty':           m.group(2),
+                'Unit Price':    m.group(3),
+                'Total Price':   m.group(4),
+                'Has Tag?':      '',
+                'Tags':          '',
+                'Wire-on Tag':   '',
+                'Calib Data?':   '',
+                'Calib Details':''
+            })
+
+    # 3) Pull off the final total
+    stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
+    if stop_match:
+        order_total = stop_match.group(1).strip()
+        text = text.split(stop_match.group(0))[0]
+
+    # 4) Split into blocks by 5-digit OA line numbers (including slash-groups)
+    blocks = re.split(r'\n(\d{5}(?:/\d{5})*)', text)
+    for i in range(1, len(blocks) - 1, 2):
+        raw_line_no = blocks[i].strip()
+        block       = blocks[i + 1]
+
+        # filter line numbers to those 1–2000
+        line_nos = []
+        for ln in raw_line_no.split('/'):
+            ln = ln.strip()
+            if ln.isdigit() and 1 <= int(ln) <= 2000:
+                line_nos.append(ln)
+        if not line_nos:
+            continue
+
+        # prepare for tag detection
+        tag_block = block.replace(cust_po, " ") if cust_po else block
+        contains_tag_section = bool(re.search(r'\bTag\b', block, re.IGNORECASE))
+
+        # split lines once for reuse
+        lines = block.split('\n')
+        lines_clean = [l.strip() for l in lines if l.strip()]
+
+        for line_no in line_nos:
+            # — Model Number: first 6+ char uppercase/digit token with at least one letter —
+            model_m = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
+            model   = model_m.group(0) if model_m else ""
+
+            # — Ship Date —
+            sd = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
+            if sd:
+                ship_date = sd.group(1)
+            else:
+                sd2 = re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block)
+                ship_date = sd2.group(1) if sd2 else ""
+
+            # — Qty / Unit / Total —
+            qty = unit_price = total_price = ""
+            m2 = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+            if m2:
+                qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
+
+            # —— TAGS —— only if the block actually labels a Tag section
+            tags = []
+            wire_on_tags = []
+            if contains_tag_section:
+                for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block):
+                    if cust_po and (t == cust_po or t.startswith(cust_po)):
+                        continue
+                    is_model     = (t == model)
+                    is_cve       = 'CVE' in t or 'TSE' in t
+                    has_letters  = bool(re.search(r'[A-Z]', t))
+                    has_digits   = bool(re.search(r'\d', t))
+                    is_all_digits= bool(re.fullmatch(r'[
 
 import pdfplumber
 import pandas as pd
