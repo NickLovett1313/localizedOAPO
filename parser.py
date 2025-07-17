@@ -253,37 +253,20 @@ def parse_oa(file):
                 if any('WIRE' in ln.upper() for ln in lines_clean):
                     wire_on_tags.append(ic_norm)
 
-            # Dedupe
+            # Dedupe before replication
             tags = list(dict.fromkeys(tags))
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
-            # ── Filter out unwanted C23F tags ──
-            filtered = []
-            for t in tags:
-                m_c23 = re.search(r'C23F\s*0*(\d+)', t, flags=re.IGNORECASE)
-                if m_c23 and int(m_c23.group(1)) >= 57:
-                    continue
-                filtered.append(t)
-            tags = filtered
-
-            filtered_wire = []
-            for t in wire_on_tags:
-                m_c23 = re.search(r'C23F\s*0*(\d+)', t, flags=re.IGNORECASE)
-                if m_c23 and int(m_c23.group(1)) >= 57:
-                    continue
-                filtered_wire.append(t)
-            wire_on_tags = filtered_wire
-
-            has_tag = 'Y' if tags else 'N'
-
-            # 7) Replicate by quantity
+            # 7) —— NEW: replicate by quantity —— 
             if qty.isdigit():
                 count = int(qty)
                 if count > 1:
                     tags = [t for t in tags for _ in range(count)]
                     wire_on_tags = [t for t in wire_on_tags for _ in range(count)]
 
-            # 8) Calibration / Configuration
+            has_tag = 'Y' if tags else 'N'
+
+            # 8) Calibration / Configuration (unchanged)
             calib_parts  = []
             wire_configs = []
             for idx, ln in enumerate(lines_clean):
@@ -355,6 +338,5 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
-
 
 
