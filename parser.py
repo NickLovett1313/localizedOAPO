@@ -154,8 +154,10 @@ def parse_oa(file):
 
     # 2) Minimal “TARIFF” surcharge detector
     for line in text.split('\n'):
-        m = re.match(r'\s*\d+\.\d+\s+([A-Z0-9\-]*TARIFF[A-Z0-9\-]*)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})',
-                     line, re.IGNORECASE)
+        m = re.match(
+            r'\s*\d+\.\d+\s+([A-Z0-9\-]*TARIFF[A-Z0-9\-]*)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})',
+            line, re.IGNORECASE
+        )
         if m:
             tariff_rows.append({
                 'Line No':       '',
@@ -184,11 +186,8 @@ def parse_oa(file):
         block       = blocks[i + 1]
 
         # filter line numbers to those 1–10000
-        line_nos = []
-        for ln in raw_line_no.split('/'):
-            ln = ln.strip()
-            if ln.isdigit() and 1 <= int(ln) <= 10000:
-                line_nos.append(ln)
+        line_nos = [ln for ln in raw_line_no.split('/')
+                    if ln.isdigit() and 1 <= int(ln) <= 10000]
         if not line_nos:
             continue
 
@@ -201,10 +200,11 @@ def parse_oa(file):
         lines_clean = [l.strip() for l in lines if l.strip()]
 
         for line_no in line_nos:
+            # — Model Number —
             model_m = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
             model   = model_m.group(0) if model_m else ""
 
-            # Ship Date
+            # — Ship Date —
             sd = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
             if sd:
                 ship_date = sd.group(1)
@@ -212,15 +212,17 @@ def parse_oa(file):
                 sd2 = re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block)
                 ship_date = sd2.group(1) if sd2 else ""
 
-            # Qty / Unit / Total
+            # — Qty / Unit / Total —
             qty = unit_price = total_price = ""
             m2 = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-            # TAGS
+            # —— TAGS & WIRE-ON TAGS initialization
             tags = []
             wire_on_tags = []
+
+            # existing tag section logic
             if contains_tag_section:
                 for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block):
                     if cust_po and (t == cust_po or t.startswith(cust_po)):
@@ -238,6 +240,7 @@ def parse_oa(file):
                     elif re.search(r'IC\d{2,5}-NC', t.upper()):
                         tags.append(t)
 
+                # wire-on tags within tag section
                 for idx, ln in enumerate(lines_clean):
                     if 'WIRE' in ln.upper() and idx + 1 < len(lines_clean):
                         for p in lines_clean[idx + 1].split('/'):
@@ -245,21 +248,27 @@ def parse_oa(file):
                             if p and (p in tags or re.search(r'IC\d{2,5}-NC', p.upper())):
                                 wire_on_tags.append(p)
 
+                # enforce qty==1 → only first tag
                 if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                     tags = tags[:1]
 
-                # ✅ ADDITIVE ICxxxxx-NC patch
-                for idx, ln in enumerate(lines_clean):
-                    ic_matches = re.findall(r'\bIC\d{2,5}-NC\b', ln.upper())
-                    for ic_tag in ic_matches:
-                        if ic_tag not in tags:
-                            tags.append(ic_tag)
-                            if idx > 0 and 'WIRE' in lines_clean[idx - 1].upper():
-                                wire_on_tags.append(ic_tag)
+            # —— UNIVERSAL ICxxxxx-NC DETECTION —— 
+            # (runs regardless of contains_tag_section)
+            for ic_tag in set(re.findall(r'\bIC\d{2,5}-NC\b', block.upper())):
+                if ic_tag not in tags:
+                    tags.append(ic_tag)
+                # if any wire context is present, classify as wire-on
+                if any('WIRE' in l.upper() for l in lines_clean):
+                    if ic_tag not in wire_on_tags:
+                        wire_on_tags.append(ic_tag)
+
+            # Deduplicate lists
+            tags = list(dict.fromkeys(tags))
+            wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
             has_tag = 'Y' if tags else 'N'
 
-            # Calibration / Configuration
+            # —— CALIBRATION / CONFIGURATION (unchanged) ——
             calib_parts  = []
             wire_configs = []
             for idx, ln in enumerate(lines_clean):
@@ -287,6 +296,7 @@ def parse_oa(file):
             calib_data    = 'Y' if calib_parts else 'N'
             calib_details = ", ".join(calib_parts)
 
+            # Append row
             data.append({
                 'Line No':       line_no,
                 'Model Number':  model,
@@ -322,7 +332,7 @@ def parse_oa(file):
         }])], ignore_index=True)
 
     # 7) Final sort
-    df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
+    df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main = df_main.sort_values(
         by='Line No',
@@ -331,4 +341,3 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
-
