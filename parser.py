@@ -201,11 +201,10 @@ def parse_oa(file):
         lines_clean = [l.strip() for l in lines if l.strip()]
 
         for line_no in line_nos:
-            # — Model Number: first 6+ char uppercase/digit token with at least one letter —
             model_m = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
             model   = model_m.group(0) if model_m else ""
 
-            # — Ship Date —
+            # Ship Date
             sd = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
             if sd:
                 ship_date = sd.group(1)
@@ -213,13 +212,13 @@ def parse_oa(file):
                 sd2 = re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block)
                 ship_date = sd2.group(1) if sd2 else ""
 
-            # — Qty / Unit / Total —
+            # Qty / Unit / Total
             qty = unit_price = total_price = ""
             m2 = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-            # —— TAGS —— only if the block actually labels a Tag section
+            # TAGS
             tags = []
             wire_on_tags = []
             if contains_tag_section:
@@ -239,7 +238,6 @@ def parse_oa(file):
                     elif re.search(r'IC\d{2,5}-NC', t.upper()):
                         tags.append(t)
 
-                # wire-on tags also only if Tag section present
                 for idx, ln in enumerate(lines_clean):
                     if 'WIRE' in ln.upper() and idx + 1 < len(lines_clean):
                         for p in lines_clean[idx + 1].split('/'):
@@ -247,13 +245,21 @@ def parse_oa(file):
                             if p and (p in tags or re.search(r'IC\d{2,5}-NC', p.upper())):
                                 wire_on_tags.append(p)
 
-                # enforce qty==1 → only first tag
                 if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                     tags = tags[:1]
 
+                # ✅ ADDITIVE ICxxxxx-NC patch
+                for idx, ln in enumerate(lines_clean):
+                    ic_matches = re.findall(r'\bIC\d{2,5}-NC\b', ln.upper())
+                    for ic_tag in ic_matches:
+                        if ic_tag not in tags:
+                            tags.append(ic_tag)
+                            if idx > 0 and 'WIRE' in lines_clean[idx - 1].upper():
+                                wire_on_tags.append(ic_tag)
+
             has_tag = 'Y' if tags else 'N'
 
-            # —— CALIBRATION / CONFIG —— unaffected
+            # Calibration / Configuration
             calib_parts  = []
             wire_configs = []
             for idx, ln in enumerate(lines_clean):
@@ -315,9 +321,9 @@ def parse_oa(file):
             'Calib Details':''
         }])], ignore_index=True)
 
-    # 7) Final sort without changing 'Line No'
+    # 7) Final sort
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
-    df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
+    df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main = df_main.sort_values(
         by='Line No',
         key=lambda col: pd.to_numeric(col, errors='coerce'),
@@ -325,3 +331,4 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
