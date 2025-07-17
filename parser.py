@@ -148,11 +148,11 @@ def parse_oa(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join(p.extract_text() or "" for p in pdf.pages)
 
-    # 1a) Extract Customer PO (used to exclude tag false positives)
+    # 1a) Extract the Customer PO so it’s never treated as a tag
     cp_matches = re.findall(r'Customer PO(?: No)?\s*:\s*([A-Z0-9\-]+)', text, re.IGNORECASE)
     cust_po = cp_matches[-1].strip() if cp_matches else None
 
-    # 2) TARIFF lines (optional)
+    # 2) Minimal “TARIFF” surcharge detector
     for line in text.split('\n'):
         m = re.match(r'\s*\d+\.\d+\s+([A-Z0-9\-]*TARIFF[A-Z0-9\-]*)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})',
                      line, re.IGNORECASE)
@@ -171,19 +171,19 @@ def parse_oa(file):
                 'Calib Details':''
             })
 
-    # 3) Order total
+    # 3) Pull off the final total
     stop_match = re.search(r'Total.*?\(USD\).*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into 5-digit OA line number blocks
+    # 4) Split into blocks by 5-digit OA line numbers (including slash-groups)
     blocks = re.split(r'\n(\d{5}(?:/\d{5})*)', text)
     for i in range(1, len(blocks) - 1, 2):
         raw_line_no = blocks[i].strip()
         block       = blocks[i + 1]
 
-        # line number filter
+        # filter line numbers to those 1–10000
         line_nos = []
         for ln in raw_line_no.split('/'):
             ln = ln.strip()
@@ -193,6 +193,8 @@ def parse_oa(file):
             continue
 
         tag_block = block.replace(cust_po, " ") if cust_po else block
+        contains_tag_section = bool(re.search(r'\bTag\b', block, re.IGNORECASE))
+
         lines = block.split('\n')
         lines_clean = [l.strip() for l in lines if l.strip()]
 
@@ -213,54 +215,58 @@ def parse_oa(file):
                 sd2 = re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block)
                 ship_date = sd2.group(1) if sd2 else ""
 
-            # — TAG LOGIC (always runs now) —
+            # —— TAG LOGIC (with IC fallback) —— #
             tags = []
             wire_on_tags = []
 
-            for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block):
-                if cust_po and (t == cust_po or t.startswith(cust_po)):
-                    continue
-                is_model      = (t == model)
-                is_cve        = 'CVE' in t or 'TSE' in t
-                has_letters   = bool(re.search(r'[A-Z]', t))
-                has_digits    = bool(re.search(r'\d', t))
-                is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
-                is_date       = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t))
-                ok_len        = 5 <= len(t) <= 50
+            if contains_tag_section:
+                # Step 1: extract all tag-like values
+                for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block):
+                    if cust_po and (t == cust_po or t.startswith(cust_po)):
+                        continue
+                    is_model      = (t == model)
+                    is_cve        = 'CVE' in t or 'TSE' in t
+                    has_letters   = bool(re.search(r'[A-Z]', t))
+                    has_digits    = bool(re.search(r'\d', t))
+                    is_all_digits = bool(re.fullmatch(r'[\d\-]+', t))
+                    is_date       = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t))
+                    ok_len        = 5 <= len(t) <= 50
 
-                if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and ok_len:
-                    tags.append(t)
-                elif re.search(r'IC\d{2,5}-NC', t.upper()):
-                    tags.append(t)
+                    if not is_model and not is_cve and has_letters and has_digits and not is_all_digits and not is_date and ok_len:
+                        tags.append(t)
+                    elif re.search(r'IC\d{2,5}-NC', t.upper()):
+                        tags.append(t)
 
-            # New: Fallback for ICxxxx-NC tags missed above (no \b, use raw block)
-            ic_tags = re.findall(r'IC\d{2,5}-NC', block)
-            for ic in ic_tags:
-                if ic not in tags:
-                    tags.append(ic)
+                # Step 2: add any missed ICxxxx-NC tags that weren’t caught
+                ic_tags = re.findall(r'\bIC\d{2,5}-NC\b', tag_block)
+                for ic in ic_tags:
+                    if ic not in tags:
+                        tags.append(ic)
 
-            # — Wire-on tags only if "WIRE" label present —
-            for idx, ln in enumerate(lines_clean):
-                if 'WIRE' in ln.upper() and idx + 1 < len(lines_clean):
-                    for p in lines_clean[idx + 1].split('/'):
-                        p = p.strip()
-                        if p and (p in tags or re.search(r'IC\d{2,5}-NC', p.upper())):
-                            wire_on_tags.append(p)
+                # Step 3: extract wire-on tags
+                for idx, ln in enumerate(lines_clean):
+                    if 'WIRE' in ln.upper() and idx + 1 < len(lines_clean):
+                        for p in lines_clean[idx + 1].split('/'):
+                            p = p.strip()
+                            if p and (p in tags or re.search(r'IC\d{2,5}-NC', p.upper())):
+                                wire_on_tags.append(p)
 
-            # Remove wire-on tags from main tag list
-            tags = [t for t in tags if t not in wire_on_tags]
+                # Step 4: remove wire-on tags from main tag list
+                tags = [t for t in tags if t not in wire_on_tags]
 
-            # Cap tag count
-            if qty.isdigit():
-                expected = int(qty) * 2
-                if len(tags) > expected:
-                    tags = tags[:expected]
-                if int(qty) == 1 and len(tags) > 1:
+                # Step 5: cap tag count to qty * 2
+                if qty.isdigit():
+                    expected = int(qty) * 2
+                    if len(tags) > expected:
+                        tags = tags[:expected]
+
+                # Step 6: enforce single tag if qty == 1
+                if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                     tags = tags[:1]
 
             has_tag = 'Y' if tags else 'N'
 
-            # — Calibration —
+            # — Calibration / Config —
             calib_parts  = []
             wire_configs = []
             for idx, ln in enumerate(lines_clean):
@@ -302,10 +308,10 @@ def parse_oa(file):
                 'Calib Details': calib_details
             })
 
-    # 5) Append tariff rows
+    # 5) Append surcharge rows
     data.extend(tariff_rows)
 
-    # 6) Build DataFrame + ORDER TOTAL row
+    # 6) Build DataFrame & append ORDER TOTAL
     df = pd.DataFrame(data)
     if order_total:
         df = pd.concat([df, pd.DataFrame([{
@@ -322,7 +328,7 @@ def parse_oa(file):
             'Calib Details': ''
         }])], ignore_index=True)
 
-    # 7) Sort by Line No, preserve ORDER TOTAL at end
+    # 7) Final sort without changing 'Line No'
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main = df_main.sort_values(
@@ -332,3 +338,4 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
