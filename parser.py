@@ -253,20 +253,33 @@ def parse_oa(file):
                 if any('WIRE' in ln.upper() for ln in lines_clean):
                     wire_on_tags.append(ic_norm)
 
-            # Dedupe before replication
+            # Dedupe
             tags = list(dict.fromkeys(tags))
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
-            # 7) —— NEW: replicate by quantity —— 
+            # ── Filter out unwanted C23F tags ──
+            filtered = []
+            for t in tags:
+                m_c23 = re.match(r'^C23F(\d+)$', t)
+                if m_c23 and int(m_c23.group(1)) >= 57:
+                    continue
+                filtered.append(t)
+            tags = filtered
+            wire_on_tags = [
+                t for t in wire_on_tags
+                if not (re.match(r'^C23F(\d+)$', t) and int(re.match(r'^C23F(\d+)$', t).group(1)) >= 57)
+            ]
+
+            has_tag = 'Y' if tags else 'N'
+
+            # 7) Replicate by quantity
             if qty.isdigit():
                 count = int(qty)
                 if count > 1:
                     tags = [t for t in tags for _ in range(count)]
                     wire_on_tags = [t for t in wire_on_tags for _ in range(count)]
 
-            has_tag = 'Y' if tags else 'N'
-
-            # 8) Calibration / Configuration (unchanged)
+            # 8) Calibration / Configuration
             calib_parts  = []
             wire_configs = []
             for idx, ln in enumerate(lines_clean):
