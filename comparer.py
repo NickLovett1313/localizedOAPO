@@ -7,11 +7,18 @@ def compare_oa_po(po_df, oa_df):
     discrepancies = []
     date_mismatches = []
 
+    # Normalize line numbers by stripping leading zeros
+    def normalize_line_no(val):
+        return str(val).lstrip('0') or '0'
+
+    po_df['Line No'] = po_df['Line No'].astype(str).apply(normalize_line_no)
+    oa_df['Line No'] = oa_df['Line No'].astype(str).apply(normalize_line_no)
+
     # Strip ORDER TOTAL rows only for group-level matching
     po_main = po_df[po_df['Model Number'] != 'ORDER TOTAL'].copy()
     oa_main = oa_df[oa_df['Model Number'] != 'ORDER TOTAL'].copy()
 
-    # Group OA and PO by Line No
+    # Group OA and PO by normalized Line No
     po_groups = po_main.groupby('Line No')
     oa_groups = oa_main.groupby('Line No')
 
