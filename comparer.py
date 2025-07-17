@@ -1,134 +1,113 @@
 import pandas as pd
-import difflib
+from difflib import ndiff
 
-def compare_oa_po(oa_df, po_df):
-    messages = []
-    date_discrepancies = []
+def normalize_line(line):
+    try:
+        return str(int(str(line).lstrip("0")))
+    except:
+        return str(line).strip()
 
-    # Normalize line numbers (strip leading zeros)
-    oa_df['Line No'] = oa_df['Line No'].astype(str).str.lstrip('0')
-    po_df['Line No'] = po_df['Line No'].astype(str).str.lstrip('0')
+def clean_tags(val):
+    return [t.strip() for t in val.split(',') if t.strip()] if isinstance(val, str) else []
 
-    # Drop blank lines (but keep ORDER TOTAL and tariff rows)
-    def is_valid_line(df):
-        return (df['Model Number'].fillna('') != '') | (df['Total Price'].fillna('') != '')
-    oa_df = oa_df[is_valid_line(oa_df)].copy()
-    po_df = po_df[is_valid_line(po_df)].copy()
+def compare_oa_po(po_df, oa_df):
+    try:
+        # Normalize line numbers
+        po_df['Line No'] = po_df['Line No'].apply(normalize_line)
+        oa_df['Line No'] = oa_df['Line No'].apply(normalize_line)
 
-    # Set index by Line No for easier matching
-    oa_indexed = oa_df.set_index('Line No')
-    po_indexed = po_df.set_index('Line No')
+        po_groups = po_df.groupby('Line No')
+        oa_groups = oa_df.groupby('Line No')
 
-    all_lines = sorted(set(oa_indexed.index).union(po_indexed.index), key=lambda x: int(x) if x.isdigit() else 99999)
+        all_lines = set(po_df['Line No'].dropna().astype(str)) | set(oa_df['Line No'].dropna().astype(str))
 
-    discrepancy_rows = []
+        discrepancies = []
+        date_discrepancies = []
 
-    for line in all_lines:
-        oa_row = oa_indexed.loc[line] if line in oa_indexed.index else None
-        po_row = po_indexed.loc[line] if line in po_indexed.index else None
+        for line in sorted(all_lines, key=lambda x: int(x) if x.isdigit() else 99999):
+            po_rows = po_groups.get_group(line) if line in po_groups.groups else pd.DataFrame()
+            oa_rows = oa_groups.get_group(line) if line in oa_groups.groups else pd.DataFrame()
 
-        # Missing lines
-        if oa_row is None:
-            discrepancy_rows.append([line, "Missing from OA", "", "Exists in PO"])
-            continue
-        if po_row is None:
-            if "TARIFF" in str(oa_row['Model Number']).upper():
-                tariff_amt = oa_row['Total Price']
-                discrepancy_rows.append([line, "TARIFF line exists in OA but is missing from PO", "", f"Amount: ${tariff_amt}"])
-            else:
-                discrepancy_rows.append([line, "Exists in OA", "", "Missing from PO"])
-            continue
+            if po_rows.empty:
+                discrepancies.append(("Line Missing in PO", line, "", "Present in OA only"))
+                continue
+            if oa_rows.empty:
+                discrepancies.append(("Line Missing in OA", line, "Present in PO only", ""))
+                continue
 
-        # Normalize comparison values
-        def norm(val): return str(val).strip()
+            po_row = po_rows.iloc[0]
+            oa_row = oa_rows.iloc[0]
 
-        # Model mismatch
-        if norm(oa_row['Model Number']) != norm(po_row['Model Number']):
-            diff = '\n'.join(difflib.ndiff([norm(po_row['Model Number'])], [norm(oa_row['Model Number'])]))
-            discrepancy_rows.append([line, "Model Number", norm(po_row['Model Number']), norm(oa_row['Model Number'])])
+            # Model Number
+            if po_row['Model Number'] != oa_row['Model Number']:
+                diff = '\n'.join(ndiff([str(po_row['Model Number'])], [str(oa_row['Model Number'])]))
+                discrepancies.append(("Model Number", line, po_row['Model Number'], oa_row['Model Number'] + "\n" + diff))
 
-        # Quantity
-        if norm(oa_row['Qty']) != norm(po_row['Qty']):
-            discrepancy_rows.append([line, "Quantity", norm(po_row['Qty']), norm(oa_row['Qty'])])
+            # Ship Date
+            if po_row['Ship Date'] != oa_row['Ship Date']:
+                date_discrepancies.append((line, oa_row['Ship Date'], po_row['Ship Date']))
 
-        # Unit Price
-        if norm(oa_row['Unit Price']) != norm(po_row['Unit Price']):
-            discrepancy_rows.append([line, "Unit Price", norm(po_row['Unit Price']), norm(oa_row['Unit Price'])])
+            # Quantity
+            if po_row['Qty'] != oa_row['Qty']:
+                discrepancies.append(("Quantity", line, po_row['Qty'], oa_row['Qty']))
 
-        # Total Price
-        if norm(oa_row['Total Price']) != norm(po_row['Total Price']):
-            discrepancy_rows.append([line, "Total Price", norm(po_row['Total Price']), norm(oa_row['Total Price'])])
+            # Unit Price
+            if po_row['Unit Price'] != oa_row['Unit Price']:
+                discrepancies.append(("Unit Price", line, po_row['Unit Price'], oa_row['Unit Price']))
 
-        # Ship Date
-        if norm(oa_row['Ship Date']) != norm(po_row['Ship Date']):
-            date_discrepancies.append((line, norm(oa_row['Ship Date']), norm(po_row['Ship Date'])))
+            # Total Price
+            if po_row['Total Price'] != oa_row['Total Price']:
+                discrepancies.append(("Total Price", line, po_row['Total Price'], oa_row['Total Price']))
 
-        # Calibration mismatch
-        if norm(oa_row['Calib Details']) != norm(po_row['Calib Details']):
-            discrepancy_rows.append([line, "Calibration", norm(po_row['Calib Details']), norm(oa_row['Calib Details'])])
+            # Tags
+            po_tags = clean_tags(po_row.get('Tags', ''))
+            oa_tags = clean_tags(oa_row.get('Tags', ''))
+            wire_tags = clean_tags(oa_row.get('Wire-on Tag', ''))
 
-        # Tags match logic
-        oa_tags = sorted([t.strip() for t in str(oa_row['Tags']).split(',') if t.strip()])
-        oa_wire_tags = sorted([t.strip() for t in str(oa_row['Wire-on Tag']).split(',') if t.strip()])
-        po_tags = sorted([t.strip() for t in str(po_row['Tags']).split(',') if t.strip()])
+            if sorted(po_tags * int(po_row.get('Qty') or 1)) != sorted(oa_tags):
+                discrepancies.append(("Tag Mismatch", line, ", ".join(po_tags), ", ".join(oa_tags)))
 
-        # Check for mismatched wire-on tag alignment
-        if oa_tags and oa_wire_tags:
-            unmatched_wire_tags = [t for t in oa_wire_tags if t not in oa_tags]
-            if unmatched_wire_tags:
-                discrepancy_rows.append([line, "Wire-on Tag mismatch", "", f"Missing: {', '.join(unmatched_wire_tags)}"])
+            if wire_tags and set(wire_tags) != set(oa_tags):
+                discrepancies.append(("Wire-on Tag Mismatch", line, ", ".join(wire_tags), ", ".join(oa_tags)))
 
-        # Tag presence logic (PO tags *must* appear exact # of times in OA tags)
-        tag_mismatch = False
-        for tag in po_tags:
-            expected_count = po_tags.count(tag)
-            actual_count = oa_tags.count(tag)
-            if actual_count < expected_count:
-                tag_mismatch = True
-                discrepancy_rows.append([line, f"Tag mismatch ({tag})", f"Expected {expected_count}", f"Found {actual_count}"])
+            # Calibration details
+            if oa_row.get("Calib Details", "") and po_row.get("Calib Details", ""):
+                if oa_row["Calib Details"].lower().strip() != po_row["Calib Details"].lower().strip():
+                    discrepancies.append(("Calibration Details", line, po_row["Calib Details"], oa_row["Calib Details"]))
 
-    # Order total mismatch (check if tariff explains it)
-    oa_total = oa_df[oa_df['Model Number'] == 'ORDER TOTAL']['Total Price'].values
-    po_total = po_df[po_df['Model Number'] == 'ORDER TOTAL']['Total Price'].values
+        # Check order total
+        po_total = po_df[po_df['Model Number'] == 'ORDER TOTAL']['Total Price'].values
+        oa_total = oa_df[oa_df['Model Number'] == 'ORDER TOTAL']['Total Price'].values
 
-    if oa_total and po_total and norm(oa_total[0]) != norm(po_total[0]):
-        oa_val = float(oa_total[0].replace(',', ''))
-        po_val = float(po_total[0].replace(',', ''))
-        tariff_rows = oa_df[oa_df['Model Number'].str.upper().str.contains("TARIFF", na=False)]
-        tariff_amt = sum([float(t.replace(',', '')) for t in tariff_rows['Total Price'] if t.strip().replace(',', '').replace('.', '').isdigit()])
-        if abs(oa_val - po_val - tariff_amt) < 0.01:
-            discrepancy_rows.append(['', 'ORDER TOTAL', f"${po_val:,.2f}", f"${oa_val:,.2f} (**note that the order total differs by exactly the amount of the tariff charge**)"])
-        else:
-            discrepancy_rows.append(['', 'ORDER TOTAL', f"${po_val:,.2f}", f"${oa_val:,.2f}"])
+        if len(po_total) and len(oa_total):
+            po_amt = float(po_total[0].replace(',', ''))
+            oa_amt = float(oa_total[0].replace(',', ''))
+            if po_amt != oa_amt:
+                # Check for tariff
+                tariff_rows = oa_df[oa_df['Model Number'].str.contains('TARIFF', na=False, case=False)]
+                if not tariff_rows.empty:
+                    tariff_amt = sum(float(val.replace(',', '')) for val in tariff_rows['Total Price'] if val)
+                    if abs(po_amt + tariff_amt - oa_amt) < 0.01:
+                        note = f"**note that the order total differs by exactly the amount of the tariff charge**"
+                        discrepancies.append(("Order Total", "", f"${po_amt:,.2f}", f"${oa_amt:,.2f}  \n{note}"))
+                    else:
+                        discrepancies.append(("Order Total", "", f"${po_amt:,.2f}", f"${oa_amt:,.2f}"))
+                else:
+                    discrepancies.append(("Order Total", "", f"${po_amt:,.2f}", f"${oa_amt:,.2f}"))
 
-    # Build summary message
-    summary_text = (
-        "I have reviewed the OA and Factory PO for this order and found the following discrepancies:"
-        if discrepancy_rows or date_discrepancies
-        else "I have reviewed the OA and Factory PO for this order and found **no discrepancies**. Everything else looked good."
-    )
+        # Check if PO is missing any tariff lines
+        oa_tariffs = oa_df[oa_df['Model Number'].str.contains('TARIFF', na=False, case=False)]
+        po_tariffs = po_df[po_df['Model Number'].str.contains('TARIFF', na=False, case=False)]
+        if not oa_tariffs.empty and po_tariffs.empty:
+            discrepancies.append(("Tariff Charge", "", "Missing from PO", "Present in OA"))
 
-    summary_df = pd.DataFrame(discrepancy_rows, columns=["Line", "Field", "PO Value", "OA Value"]) if discrepancy_rows else pd.DataFrame()
+        summary = "I have reviewed the OA and Factory PO for this order and found the following discrepancies:" if discrepancies or date_discrepancies else "I have reviewed the OA and Factory PO for this order and found **no discrepancies**. Everything else looked good."
 
-    return summary_text, summary_df, build_date_table(date_discrepancies)
+        return {
+            "summary": summary,
+            "date_discrepancies": date_discrepancies,
+            "main_discrepancies": pd.DataFrame(discrepancies, columns=["Field", "Line", "PO Value", "OA Value"])
+        }
 
-
-def build_date_table(date_discrepancies):
-    from collections import defaultdict
-
-    grouped = defaultdict(list)
-    for line, oa_date, po_date in date_discrepancies:
-        key = (oa_date, po_date)
-        grouped[key].append(int(line) if line.isdigit() else 99999)
-
-    rows = []
-    for (oa_date, po_date), line_nums in grouped.items():
-        line_nums.sort()
-        if len(line_nums) == 1:
-            line_label = f"Line {line_nums[0]}"
-        else:
-            line_label = f"Lines {line_nums[0]}–{line_nums[-1]}"
-        rows.append((line_label, oa_date, po_date))
-
-    df = pd.DataFrame(rows, columns=["Line(s)", "OA Expected Dates", "Factory PO requested dates"])
-    return df
+    except Exception as e:
+        return {"summary": f"⚠️ An error occurred during comparison: {e}"}
