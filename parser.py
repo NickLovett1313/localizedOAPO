@@ -153,7 +153,7 @@ def parse_oa(file):
     cust_po = cp_matches[-1].strip() if cp_matches else None
 
     # 2) Minimal “TARIFF” surcharge detector
-    for line in text.split("\n"):
+    for line in text.split('\n'):
         m = re.match(
             r'\s*\d+\.\d+\s+([A-Z0-9\-]*TARIFF[A-Z0-9\-]*)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})',
             line, re.IGNORECASE
@@ -170,7 +170,7 @@ def parse_oa(file):
                 'Tags':          '',
                 'Wire-on Tag':   '',
                 'Calib Data?':   '',
-                'Calib Details': ''
+                'Calib Details':''
             })
 
     # 3) Pull off the final total
@@ -191,8 +191,9 @@ def parse_oa(file):
         if not line_nos:
             continue
 
+        tag_block            = block.replace(cust_po, " ") if cust_po else block
         contains_tag_section = bool(re.search(r'\bTag\b', block, re.IGNORECASE))
-        lines_clean = [l.strip() for l in block.split('\n') if l.strip()]
+        lines_clean          = [l.strip() for l in block.split('\n') if l.strip()]
 
         for line_no in line_nos:
             # Model Number
@@ -211,44 +212,90 @@ def parse_oa(file):
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-            # === TAG SECTION LOGIC: exact extraction under "Tag" label ===
+            # === TAG SECTION LOGIC (updated) ===
             tags = []
             wire_on_tags = []
-            if contains_tag_section:
-                # locate the line with "Tag:" or "Tags:"
-                tag_idx = next((idx for idx, l in enumerate(lines_clean)
-                                if re.match(r'(?i)^Tags?:', l)), None)
-                raw_tags_line = ""
-                if tag_idx is not None:
-                    line = lines_clean[tag_idx]
-                    # if tags follow the colon on same line
-                    if ':' in line:
-                        raw_tags_line = line.split(':', 1)[1]
-                    # else, tags on next line
-                    elif tag_idx + 1 < len(lines_clean):
-                        raw_tags_line = lines_clean[tag_idx + 1]
-                # split multiple tags by comma or semicolon
-                if raw_tags_line:
-                    tags = [t.strip() for t in re.split(r'[;,]\s*', raw_tags_line) if t.strip()]
+            skip_ic_codes = set()
 
-            # dedupe per row
+            if contains_tag_section:
+                # 1) Extract compound tags with "/ ICxxxx-NC" or "/ICxxxx-NC"
+                raw_compounds = re.findall(r'\b[A-Z0-9\-]+/\s*IC\d{2,5}-NC\b', tag_block, re.IGNORECASE)
+                for raw in raw_compounds:
+                    norm = re.sub(r'/\s*', '/', raw.upper())
+                    if cust_po and (norm == cust_po or norm.startswith(cust_po)):
+                        continue
+                    tags.append(norm)
+                    skip_ic_codes.add(norm.split('/',1)[1])
+
+                # 2) Remove compounds to preserve original tag regex
+                temp_block = tag_block
+                for c in raw_compounds:
+                    temp_block = re.sub(re.escape(c), ' ', temp_block, flags=re.IGNORECASE)
+
+                # 3) Original tag extraction
+                for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp_block):
+                    if cust_po and (t == cust_po or t.startswith(cust_po)):
+                        continue
+                    has_letters  = bool(re.search(r'[A-Z]', t))
+                    has_digits   = bool(re.search(r'\d', t))
+                    is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
+                    is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t))
+                    ok_len       = 5 <= len(t) <= 50
+                    if has_letters and has_digits and not is_all_digits and not is_date and ok_len:
+                        tags.append(t)
+
+                # 4) Combine split-across-lines IC tags
+                for idx in range(len(lines_clean)-1):
+                    combo = f"{lines_clean[idx]}/{lines_clean[idx+1]}"
+                    if re.fullmatch(r'[A-Z0-9\-]+/IC\d{2,5}-NC', combo, re.IGNORECASE):
+                        norm = combo.replace('/ ', '/').upper()
+                        if norm not in tags:
+                            tags.append(norm)
+                            skip_ic_codes.add(norm.split('/',1)[1])
+
+                # 5) Wire-on tags
+                for idx, ln in enumerate(lines_clean):
+                    if 'WIRE' in ln.upper() and idx+1 < len(lines_clean):
+                        for p in lines_clean[idx+1].split('/'):
+                            p = p.strip()
+                            if p and p in tags:
+                                wire_on_tags.append(p)
+
+                # 6) Limit to first if qty==1
+                if qty.isdigit() and int(qty)==1 and len(tags)>1:
+                    tags = tags[:1]
+
+            # Universal IC/NC detection, skip compounds
+            for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b', block, re.IGNORECASE)):
+                icn = ic.upper()
+                if icn in skip_ic_codes:
+                    continue
+                tags.append(icn)
+                if any('WIRE' in ln.upper() for ln in lines_clean):
+                    wire_on_tags.append(icn)
+
+            # Dedupe & replicate by quantity
             tags = list(dict.fromkeys(tags))
+            wire_on_tags = list(dict.fromkeys(wire_on_tags))
+            if qty.isdigit() and int(qty)>1:
+                tags = [t for t in tags for _ in range(int(qty))]
+                wire_on_tags = [w for w in wire_on_tags for _ in range(int(qty))]
+
             has_tag = 'Y' if tags else 'N'
 
-            # Calibration / Configuration logic (unchanged)
+            # Calibration/configuration logic (unchanged)
             calib_parts  = []
             wire_configs = []
             for idx, ln in enumerate(lines_clean):
                 if re.search(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln):
                     ranges = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln)
-                    unit_clean = ''
+                    unit_clean = ""
                     if idx + 1 < len(lines_clean):
-                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
-                                       lines_clean[idx + 1].upper())
+                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines_clean[idx+ 1].upper())
                         if um:
                             unit_clean = um.group(0).strip().upper()
-                    if idx + 2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx + 2].strip()):
-                        code = lines_clean[idx + 2].strip()[1]
+                    if idx + 2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx+2].strip()):
+                        code = lines_clean[idx+2].strip()[1]
                         wire_configs.append(f"{code}-wire RTD")
                     for r in ranges:
                         calib_parts.append(f"{r} {unit_clean}".strip())
@@ -275,10 +322,10 @@ def parse_oa(file):
                 'Calib Details': calib_details
             })
 
-    # 5) Append surcharge rows
+    # 9) Append surcharge rows
     data.extend(tariff_rows)
 
-    # 6) Build DataFrame & append ORDER TOTAL
+    # 10) Build DataFrame & append ORDER TOTAL
     df = pd.DataFrame(data)
     if order_total:
         df = pd.concat([df, pd.DataFrame([{
@@ -295,9 +342,12 @@ def parse_oa(file):
             'Calib Details': ''
         }])], ignore_index=True)
 
-    # 7) Final sort
-    df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
-    df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
+    # — Remove duplicate tags —
+    df['Tags'] = df['Tags'].apply(lambda s: ", ".join(dict.fromkeys([t.strip() for t in s.split(',') if t.strip()])))
+
+    # 11) Final sort
+    df_main  = df[df['Model Number']!='ORDER TOTAL'].copy()
+    df_total = df[df['Model Number']=='ORDER TOTAL'].copy()
     df_main = df_main.sort_values(
         by='Line No',
         key=lambda col: pd.to_numeric(col, errors='coerce'),
