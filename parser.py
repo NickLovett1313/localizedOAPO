@@ -212,27 +212,27 @@ def parse_oa(file):
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-            # === TAG‐SECTION LOGIC (unchanged from last) ===
+            # === TAG SECTION LOGIC (updated) ===
             tags = []
             wire_on_tags = []
+            skip_ic_codes = set()
+
             if contains_tag_section:
-                # 5a) Extract compounds with "/ICxxxx-NC"
-                compound_ic_tags = re.findall(r'\b[A-Z0-9\-]+/IC\d{2,5}-NC\b',
-                                              tag_block, re.IGNORECASE)
-                compound_ic_tags = [ct.upper() for ct in compound_ic_tags]
-                for ct in compound_ic_tags:
-                    if cust_po and (ct == cust_po or ct.startswith(cust_po)):
+                # 1) Extract compound tags with "/ ICxxxx-NC" or "/ICxxxx-NC"
+                raw_compounds = re.findall(r'\b[A-Z0-9\-]+/\s*IC\d{2,5}-NC\b', tag_block, re.IGNORECASE)
+                for raw in raw_compounds:
+                    norm = re.sub(r'/\s*', '/', raw.upper())
+                    if cust_po and (norm == cust_po or norm.startswith(cust_po)):
                         continue
-                    tags.append(ct)
-                skip_ic_codes = {ct.split('/',1)[1] for ct in compound_ic_tags}
+                    tags.append(norm)
+                    skip_ic_codes.add(norm.split('/',1)[1])
 
-                # 5b) Remove those compounds so your original regex won’t split them
+                # 2) Remove compounds to preserve original tag regex
                 temp_block = tag_block
-                for ct in compound_ic_tags:
-                    temp_block = re.sub(re.escape(ct), ' ', temp_block,
-                                        flags=re.IGNORECASE)
+                for c in raw_compounds:
+                    temp_block = re.sub(re.escape(c), ' ', temp_block, flags=re.IGNORECASE)
 
-                # 5c) Original tag regex
+                # 3) Original tag extraction
                 for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp_block):
                     if cust_po and (t == cust_po or t.startswith(cust_po)):
                         continue
@@ -244,27 +244,29 @@ def parse_oa(file):
                     if has_letters and has_digits and not is_all_digits and not is_date and ok_len:
                         tags.append(t)
 
-                # 5d) Edge‐case line‐below IC
+                # 4) Combine split-across-lines IC tags
                 for idx in range(len(lines_clean)-1):
                     combo = f"{lines_clean[idx]}/{lines_clean[idx+1]}"
-                    if re.fullmatch(r'[A-Z0-9\-]+/IC\d{2,5}-NC', combo,
-                                    re.IGNORECASE):
-                        tags.append(combo.upper())
+                    if re.fullmatch(r'[A-Z0-9\-]+/IC\d{2,5}-NC', combo, re.IGNORECASE):
+                        norm = combo.replace('/ ', '/').upper()
+                        if norm not in tags:
+                            tags.append(norm)
+                            skip_ic_codes.add(norm.split('/',1)[1])
 
-                # 5e) Wire‐on tags
+                # 5) Wire-on tags
                 for idx, ln in enumerate(lines_clean):
                     if 'WIRE' in ln.upper() and idx+1 < len(lines_clean):
                         for p in lines_clean[idx+1].split('/'):
                             p = p.strip()
                             if p and p in tags:
                                 wire_on_tags.append(p)
-                # 5f) If qty ==1, keep only first tag
+
+                # 6) Limit to first if qty==1
                 if qty.isdigit() and int(qty)==1 and len(tags)>1:
                     tags = tags[:1]
 
-            # 6) Universal IC/NC (skip our compound codes)
-            for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b',
-                                     block, re.IGNORECASE)):
+            # Universal IC/NC detection, skip compounds
+            for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b', block, flags=re.IGNORECASE)):
                 icn = ic.upper()
                 if icn in skip_ic_codes:
                     continue
@@ -272,7 +274,7 @@ def parse_oa(file):
                 if any('WIRE' in ln.upper() for ln in lines_clean):
                     wire_on_tags.append(icn)
 
-            # 7) Dedupe then replicate by qty (unchanged)
+            # Dedupe & replicate by quantity
             tags = list(dict.fromkeys(tags))
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
             if qty.isdigit() and int(qty)>1:
@@ -281,11 +283,10 @@ def parse_oa(file):
 
             has_tag = 'Y' if tags else 'N'
 
-            # 8) Calibration/configuration (unchanged)...
+            # 8) Calibration/configuration (unchanged)
             calib_parts  = []
             wire_configs = []
-            # …your existing calibration logic…
-
+            # ... existing calibration logic ...
             calib_data    = 'Y' if calib_parts else 'N'
             calib_details = ", ".join(calib_parts)
 
@@ -309,28 +310,19 @@ def parse_oa(file):
     # 10) Build DataFrame & append ORDER TOTAL
     df = pd.DataFrame(data)
     if order_total:
-        df = pd.concat([df, pd.DataFrame([{
-            'Line No':       '',
-            'Model Number':  'ORDER TOTAL',
-            'Ship Date':     '',
-            'Qty':           '',
-            'Unit Price':    '',
-            'Total Price':   order_total,
-            'Has Tag?':      '',
-            'Tags':          '',
-            'Wire-on Tag':   '',
-            'Calib Data?':   '',
-            'Calib Details':''
+        df = pd.concat([df, pd.DataFrame([{  
+            'Line No':'','Model Number':'ORDER TOTAL','Ship Date':'',
+            'Qty':'','Unit Price':'','Total Price':order_total,
+            'Has Tag?':'','Tags':'','Wire-on Tag':'',
+            'Calib Data?':'','Calib Details':''
         }])], ignore_index=True)
 
-    # — NEW STEP: remove duplicate tags in each row —
-    df['Tags'] = df['Tags'].apply(
-        lambda s: ", ".join(dict.fromkeys([t.strip() for t in s.split(',') if t.strip()]))
-    )
+    # — Remove duplicate tags —
+    df['Tags'] = df['Tags'].apply(lambda s: ", ".join(dict.fromkeys([t.strip() for t in s.split(',') if t.strip()])))
 
-    # 11) Final sort (unchanged)
-    df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
-    df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
+    # 11) Final sort
+    df_main  = df[df['Model Number']!='ORDER TOTAL'].copy()
+    df_total = df[df['Model Number']=='ORDER TOTAL'].copy()
     df_main = df_main.sort_values(
         by='Line No',
         key=lambda col: pd.to_numeric(col, errors='coerce'),
@@ -338,3 +330,4 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
