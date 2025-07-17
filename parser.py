@@ -1,8 +1,8 @@
-def parse_po(file):
-    import pdfplumber
-    import pandas as pd
-    import re
+import pdfplumber
+import pandas as pd
+import re
 
+def parse_po(file):
     data = []
     order_total = ""
 
@@ -24,8 +24,8 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by PO “line numbers” (updated regex to allow full numeric lines like 2170)
-    blocks = re.split(r'\n(\d{1,5})\n', text)
+    # 4) Split into blocks by PO “line numbers” (or stray floats)
+    blocks = re.split(r'\n(0{2,}\d{2,}|\d+\.\d+)', text)
 
     for i in range(1, len(blocks) - 1, 2):
         raw_ln = blocks[i].strip()
@@ -130,8 +130,6 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
-
-
 
 import pdfplumber
 import pandas as pd
