@@ -183,11 +183,11 @@ def parse_oa(file):
         raw_line_no = blocks[i].strip()
         block       = blocks[i + 1]
 
-        # filter line numbers to those 1–2000
+        # filter line numbers to those 1–10000
         line_nos = []
         for ln in raw_line_no.split('/'):
             ln = ln.strip()
-            if ln.isdigit() and 1 <= int(ln) <= 2000:
+            if ln.isdigit() and 1 <= int(ln) <= 10000:
                 line_nos.append(ln)
         if not line_nos:
             continue
