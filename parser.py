@@ -260,15 +260,19 @@ def parse_oa(file):
             # ── Filter out unwanted C23F tags ──
             filtered = []
             for t in tags:
-                m_c23 = re.match(r'^C23F(\d+)$', t)
+                m_c23 = re.search(r'C23F\s*0*(\d+)', t, flags=re.IGNORECASE)
                 if m_c23 and int(m_c23.group(1)) >= 57:
                     continue
                 filtered.append(t)
             tags = filtered
-            wire_on_tags = [
-                t for t in wire_on_tags
-                if not (re.match(r'^C23F(\d+)$', t) and int(re.match(r'^C23F(\d+)$', t).group(1)) >= 57)
-            ]
+
+            filtered_wire = []
+            for t in wire_on_tags:
+                m_c23 = re.search(r'C23F\s*0*(\d+)', t, flags=re.IGNORECASE)
+                if m_c23 and int(m_c23.group(1)) >= 57:
+                    continue
+                filtered_wire.append(t)
+            wire_on_tags = filtered_wire
 
             has_tag = 'Y' if tags else 'N'
 
@@ -351,5 +355,6 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
 
 
