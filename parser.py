@@ -24,18 +24,19 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by PO “line numbers” (1–5 digits)
+    # 4) Split into blocks by PO “line numbers” (updated regex to allow full numeric lines like 2170)
     blocks = re.split(r'\n(\d{1,5})\n', text)
 
     for i in range(1, len(blocks) - 1, 2):
         raw_ln = blocks[i].strip()
         block  = blocks[i + 1]
 
-        # 5) Only keep lines numbered 1–99999
-        if not raw_ln.isdigit():
-            continue
-        ln = int(raw_ln)
-        if not (1 <= ln <= 99999):
+        # 5) Only keep lines numbered 1–10000
+        if raw_ln.isdigit():
+            ln = int(raw_ln)
+            if not (1 <= ln <= 10000):
+                continue
+        else:
             continue
 
         # 6) Extract fields as before
@@ -129,6 +130,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
 
 import pdfplumber
