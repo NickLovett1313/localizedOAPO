@@ -24,7 +24,7 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by PO “line numbers” (any integer); we'll enforce 1–10000 next
+    # 4) Split into blocks by PO “line numbers” (capture any integer; enforce 1–10000 below)
     blocks = re.split(r'\n(\d+)(?=\s)', text)
 
     for i in range(1, len(blocks) - 1, 2):
@@ -120,7 +120,7 @@ def parse_po(file):
             'Tags':          '',
             'Wire-on Tag':   '',
             'Calib Data?':   '',
-            'Calib Details':''
+            'Calib Details': ''
         }
         df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
@@ -132,6 +132,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
 
 import pdfplumber
