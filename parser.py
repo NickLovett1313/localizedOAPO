@@ -222,7 +222,7 @@ def parse_oa(file):
             tags = []
             wire_on_tags = []
 
-            # existing tag section logic
+            # existing Tag-section logic (unchanged)
             if contains_tag_section:
                 for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_block):
                     if cust_po and (t == cust_po or t.startswith(cust_po)):
@@ -240,7 +240,7 @@ def parse_oa(file):
                     elif re.search(r'IC\d{2,5}-NC', t.upper()):
                         tags.append(t)
 
-                # wire-on tags within tag section
+                # wire-on tags within Tag section
                 for idx, ln in enumerate(lines_clean):
                     if 'WIRE' in ln.upper() and idx + 1 < len(lines_clean):
                         for p in lines_clean[idx + 1].split('/'):
@@ -252,17 +252,19 @@ def parse_oa(file):
                 if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                     tags = tags[:1]
 
-            # —— UNIVERSAL ICxxxxx-NC DETECTION —— 
-            # (runs regardless of contains_tag_section)
-            for ic_tag in set(re.findall(r'\bIC\d{2,5}-NC\b', block.upper())):
-                if ic_tag not in tags:
-                    tags.append(ic_tag)
-                # if any wire context is present, classify as wire-on
-                if any('WIRE' in l.upper() for l in lines_clean):
-                    if ic_tag not in wire_on_tags:
-                        wire_on_tags.append(ic_tag)
+            # —— UNIVERSAL ICxxxxx-NC DETECTION (always-on) ——
+            ic_hyphen = re.findall(r'\bIC\d{2,5}\s*-\s*NC\b', block, flags=re.IGNORECASE)
+            ic_space  = re.findall(r'\bIC\d{2,5}\s+NC\b',    block, flags=re.IGNORECASE)
+            for raw in ic_hyphen + ic_space:
+                # normalize e.g. "IC12345 - NC" or "IC12345-\nNC" → "IC12345-NC"
+                tag_norm = re.sub(r'\s*-\s*', '-', raw.upper().replace('\n',''))
+                if tag_norm not in tags:
+                    tags.append(tag_norm)
+                # if any wire context in block, slot into wire_on_tags too
+                if any('WIRE' in l.upper() for l in lines_clean) and tag_norm not in wire_on_tags:
+                    wire_on_tags.append(tag_norm)
 
-            # Deduplicate lists
+            # Dedupe
             tags = list(dict.fromkeys(tags))
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
@@ -296,7 +298,6 @@ def parse_oa(file):
             calib_data    = 'Y' if calib_parts else 'N'
             calib_details = ", ".join(calib_parts)
 
-            # Append row
             data.append({
                 'Line No':       line_no,
                 'Model Number':  model,
