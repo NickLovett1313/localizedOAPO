@@ -252,17 +252,14 @@ def parse_oa(file):
                 if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                     tags = tags[:1]
 
-            # —— UNIVERSAL ICxxxxx-NC DETECTION (always-on) ——
-            ic_hyphen = re.findall(r'\bIC\d{2,5}\s*-\s*NC\b', block, flags=re.IGNORECASE)
-            ic_space  = re.findall(r'\bIC\d{2,5}\s+NC\b',    block, flags=re.IGNORECASE)
-            for raw in ic_hyphen + ic_space:
-                # normalize e.g. "IC12345 - NC" or "IC12345-\nNC" → "IC12345-NC"
-                tag_norm = re.sub(r'\s*-\s*', '-', raw.upper().replace('\n',''))
-                if tag_norm not in tags:
-                    tags.append(tag_norm)
-                # if any wire context in block, slot into wire_on_tags too
-                if any('WIRE' in l.upper() for l in lines_clean) and tag_norm not in wire_on_tags:
-                    wire_on_tags.append(tag_norm)
+            # —— ADD-ON: catch ANY IC codes, with or without “-NC” ——
+            for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b', block, flags=re.IGNORECASE)):
+                ic_norm = ic.upper()
+                if ic_norm not in tags:
+                    tags.append(ic_norm)
+                # if block mentions any wire context, also slot it into wire_on_tags
+                if any('WIRE' in ln.upper() for ln in lines_clean) and ic_norm not in wire_on_tags:
+                    wire_on_tags.append(ic_norm)
 
             # Dedupe
             tags = list(dict.fromkeys(tags))
@@ -342,3 +339,4 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
