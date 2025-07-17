@@ -24,7 +24,7 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by line numbers (up to 10000)
+    # 4) Split into blocks by PO “line numbers” (any integer); we'll enforce 1–10000 next
     blocks = re.split(r'\n(\d+)(?=\s)', text)
 
     for i in range(1, len(blocks) - 1, 2):
@@ -57,9 +57,11 @@ def parse_po(file):
             has_letters  = bool(re.search(r'[A-Z]', t))
             has_digits   = bool(re.search(r'\d', t))
             is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
-            is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
-                              or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
-                              or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t))
+            is_date      = bool(
+                re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t) or
+                re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t) or
+                re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t)
+            )
             ok_len       = 5 <= len(t) <= 30
             if not (is_model or is_cve or is_all_digits or is_date) and has_letters and has_digits and ok_len:
                 tags.append(t)
@@ -119,7 +121,8 @@ def parse_po(file):
             'Wire-on Tag':   '',
             'Calib Data?':   '',
             'Calib Details':''
-        }    df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+        }
+        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
     # 11) Final sort
     df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
@@ -129,6 +132,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
 import pdfplumber
 import pandas as pd
