@@ -1,6 +1,6 @@
+# comparer.py
 import pandas as pd
-from collections import Counter, defaultdict
-
+from collections import Counter
 
 def compare_oa_po(po_df, oa_df):
     discrepancies = []
@@ -17,7 +17,6 @@ def compare_oa_po(po_df, oa_df):
 
     po_groups = po_main.groupby('Line No')
     oa_groups = oa_main.groupby('Line No')
-
     all_lines = set(po_main['Line No']) | set(oa_main['Line No'])
 
     def clean_tags(val):
@@ -63,11 +62,10 @@ def compare_oa_po(po_df, oa_df):
                 discrepancies.append([line, 'Calib Details', ", ".join(po_calib), ", ".join(oa_calib), 'Calibration info mismatch'])
 
             if po_row['Ship Date'] and po_row['Ship Date'] not in oa_ship_dates:
-                date_mismatches.append([line, ", ".join(oa_ship_dates), po_row['Ship Date']])
+                date_mismatches.append([f"Line {line}", ", ".join(oa_ship_dates), po_row['Ship Date']])
 
         elif po_rows is not None:
             discrepancies.append([line, 'Line Status', 'Present in PO', 'Missing in OA', 'Line missing in OA'])
-
         elif oa_rows is not None:
             oa_model = oa_rows.iloc[0]['Model Number']
             if 'TARIFF' in oa_model.upper():
@@ -90,47 +88,45 @@ def compare_oa_po(po_df, oa_df):
             discrepancies.append(['', 'Order Total', f"{po_val:,.2f}", f"{oa_val:,.2f}", comment])
 
     disc_df = pd.DataFrame(discrepancies, columns=['Line No', 'Field', 'PO Value', 'OA Value', 'Comment'])
-    date_df = build_date_table(date_mismatches)
+    date_df_raw = pd.DataFrame(date_mismatches, columns=['Line(s)', 'OA Expected Dates', 'Factory PO requested dates'])
+    date_df = group_date_discrepancies(date_df_raw.values.tolist()) if not date_df_raw.empty else pd.DataFrame()
 
     return disc_df, date_df
 
 
-def build_date_table(date_discrepancies):
-    from itertools import groupby
+def group_date_discrepancies(date_discrepancies):
+    entries = []
+    for entry in date_discrepancies:
+        if not isinstance(entry, (tuple, list)) or len(entry) != 3:
+            continue
+        line_str, oa_date, po_date = entry
+        try:
+            line_num = int(''.join(filter(str.isdigit, line_str)))
+        except ValueError:
+            continue
+        entries.append((line_num, oa_date.strip(), po_date.strip()))
 
-    def make_groups(sorted_rows):
-        # Split into subgroups where either OA or PO date changes
-        result = []
-        prev_oa, prev_po = None, None
-        group = []
-        for line, oa_date, po_date in sorted_rows:
-            if (oa_date != prev_oa or po_date != prev_po) and group:
-                result.append((group, prev_oa, prev_po))
-                group = []
-            group.append(int(line))
-            prev_oa, prev_po = oa_date, po_date
-        if group:
-            result.append((group, prev_oa, prev_po))
-        return result
+    entries.sort(key=lambda x: x[0])
+    grouped = []
+    current_group = [entries[0][0]]
+    current_oa, current_po = entries[0][1], entries[0][2]
 
-    # Sort first by OA/PO date pairs, then line numbers
-    sorted_discrepancies = sorted(
-        [(d[0], d[1], d[2]) for d in date_discrepancies if len(d) == 3],
-        key=lambda x: (x[1], x[2], int(x[0]) if str(x[0]).isdigit() else 99999)
-    )
+    for i in range(1, len(entries)):
+        line, oa_date, po_date = entries[i]
+        if oa_date == current_oa and po_date == current_po and line == current_group[-1] + 10:
+            current_group.append(line)
+        else:
+            grouped.append((current_group[:], current_oa, current_po))
+            current_group = [line]
+            current_oa, current_po = oa_date, po_date
+    grouped.append((current_group[:], current_oa, current_po))
 
-    grouped = make_groups(sorted_discrepancies)
+    formatted_rows = []
+    for lines, oa_date, po_date in grouped:
+        if len(lines) == 1:
+            line_label = f"Line {lines[0]}"
+        else:
+            line_label = f"Lines {lines[0]}–{lines[-1]}"
+        formatted_rows.append([line_label, oa_date, po_date])
 
-    rows = []
-    for group, oa_date, po_date in grouped:
-        line_str = f"Line {group[0]}" if len(group) == 1 else f"Lines {group[0]}–{group[-1]}"
-        rows.append((line_str, oa_date, po_date))
-
-    df = pd.DataFrame(rows, columns=["Line(s)", "OA Expected Dates", "Factory PO requested dates"])
-
-    # Insert merged-style row at the top
-    merged_header = pd.DataFrame([["OA Expected Dates and PO Requested Dates", "", ""]], columns=df.columns)
-    sub_headers = pd.DataFrame([["Line(s)", "OA Expected Dates", "Factory PO requested dates"]], columns=df.columns)
-    df = pd.concat([merged_header, sub_headers, df], ignore_index=True)
-
-    return df
+    return pd.DataFrame(formatted_rows, columns=["Line(s)", "OA Expected Dates", "Factory PO requested dates"])
