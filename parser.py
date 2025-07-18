@@ -229,7 +229,7 @@ def parse_oa(file):
                 tags.append(name_tag)
             else:
                 if contains_tag_section:
-                    # 1) Grab whole-string slash-compounds
+                    # 1) Grab whole-string slash-compounds (flexible spaces)
                     raw_comps = re.findall(
                         r'\b[A-Z0-9\-_]+(?:\s*/\s*IC\d{2,5}-NC)\b',
                         tag_block, re.IGNORECASE
@@ -286,7 +286,11 @@ def parse_oa(file):
             # Compute wire-on tags
             wire_on_tags = [t for t in tags if '/' in t]
 
-            # ── NEW POST-PROCESSING FOR QTY==1 ──
+            # ── NEW FILTER: drop any incomplete split tags ending in '-' ──
+            tags = [t for t in tags if not t.endswith('-')]
+            wire_on_tags = [t for t in wire_on_tags if not t.endswith('-')]
+
+            # ── POST-PROCESSING FOR QTY == 1 ──
             if qty.isdigit() and int(qty) == 1:
                 slash_tags = [t for t in tags if '/' in t]
                 if slash_tags:
@@ -301,7 +305,7 @@ def parse_oa(file):
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
             has_tag = 'Y' if tags else 'N'
 
-            # Calibration/configuration logic
+            # Calibration/configuration logic (unchanged) …
             calib_parts  = []
             wire_configs = []
             for idx3, ln3 in enumerate(lines_clean):
@@ -309,8 +313,10 @@ def parse_oa(file):
                     ranges    = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3)
                     unit_clean= ""
                     if idx3+1 < len(lines_clean):
-                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
-                                       lines_clean[idx3+1].upper())
+                        um = re.search(
+                            r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
+                            lines_clean[idx3+1].upper()
+                        )
                         if um:
                             unit_clean = um.group(0).strip().upper()
                     if idx3+2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx3+2].strip()):
@@ -376,5 +382,6 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
 
 
