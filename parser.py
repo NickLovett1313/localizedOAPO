@@ -23,68 +23,72 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Updated line splitter
+    # 4) Split into blocks by line number
     blocks = re.split(r'\n(0*\d{4,5})', text)
 
     for i in range(1, len(blocks) - 1, 2):
         raw_ln = blocks[i].strip()
         block  = blocks[i + 1]
-
         if not raw_ln.isdigit():
             continue
         ln = int(raw_ln)
         if ln <= 0:
             continue
 
-        # Model & dates & pricing
-        model     = re.search(r'([A-Z0-9\-_]{6,})', block)
-        ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
-        m = re.search(r'(\d+)\s+EA\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+        # extract model, dates, pricing
+        model_m    = re.search(r'([A-Z0-9\-_]{6,})', block)
+        model_str  = model_m.group(1) if model_m else ''
+        ship_date_m = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
+        ship_date   = ship_date_m.group(1) if ship_date_m else ''
         qty = unit_price = total_price = ""
+        m = re.search(r'(\d+)\s+EA\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
         if m:
             qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
-        model_str = model.group(1) if model else ''
 
-        # ─── SLASH-COMPOUND TAGS ───
+        # ── Isolate only the text under the "Tag(s)" heading and before "Sold To:" ──
+        tag_section = ""
+        tag_hdr = re.search(r'\bTag(?:s)?\b', block, re.IGNORECASE)
+        sold_to = re.search(r'\bSold To\b', block, re.IGNORECASE)
+        if tag_hdr:
+            start = tag_hdr.end()
+            end   = sold_to.start() if sold_to else len(block)
+            tag_section = block[start:end]
+        # else leave tag_section empty
+
+        # ── SLASH-COMPOUND TAGS ──
         slash_comps = []
-        for raw in re.findall(r'\b[A-Z0-9\-_]+\s*/\s*[A-Z0-9\-]+(?:-NC)?\b', block, re.IGNORECASE):
+        for raw in re.findall(r'\b[A-Z0-9\-_]+\s*/\s*[A-Z0-9\-]+\b', tag_section, re.IGNORECASE):
             comp = re.sub(r'\s*/\s*', '/', raw.upper())
             slash_comps.append(comp)
 
-        # ─── GENERIC TAGS ───
+        # ── GENERIC TAGS ──
         tags = slash_comps.copy()
-        for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block):
-            norm = t.upper()
+        for raw in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_section):
+            norm = raw.upper()
             if norm in slash_comps:
                 continue
-            # existing filters
-            is_model     = model_str and norm == model_str
-            is_cve       = 'CVE' in norm or 'TSE' in norm
-            has_letters  = bool(re.search(r'[A-Z]', norm))
-            has_digits   = bool(re.search(r'\d', norm))
+            # filter out pure dates or numbers-only
+            is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm))
             is_all_digits= bool(re.fullmatch(r'[\d\-]+', norm))
-            is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm) or
-                              re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', norm) or
-                              re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', norm))
-            ok_len       = 5 <= len(norm) <= 30
-
-            if not (is_model or is_cve or is_all_digits or is_date) and has_letters and has_digits and ok_len:
+            has_letter   = bool(re.search(r'[A-Z]', norm))
+            has_digit    = bool(re.search(r'\d', norm))
+            if has_letter and has_digit and not is_date and not is_all_digits:
                 tags.append(norm)
 
-        # ─── DEDUPE & FINALIZE ───
+        # ── DEDUPE & FINALIZE ──
         tags = list(dict.fromkeys(tags))
         has_tag = 'Y' if tags else 'N'
 
         data.append({
             'Line No':       ln,
             'Model Number':  model_str,
-            'Ship Date':     ship_date.group(1) if ship_date else '',
+            'Ship Date':     ship_date,
             'Qty':           qty,
             'Unit Price':    unit_price,
             'Total Price':   total_price,
             'Has Tag?':      has_tag,
             'Tags':          ", ".join(tags),
-            'Wire-on Tag':   '',
+            'Wire-on Tag':   "",  # keep blank or handle separately if needed
             'Calib Data?':   '',
             'Calib Details': ''
         })
@@ -115,8 +119,8 @@ def parse_po(file):
         }])], ignore_index=True)
 
     # 12) Final sort
-    df_main  = df[df['Model Number'] != 'ORDER TOTAL'].copy()
-    df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
+    df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
+    df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
     df = pd.concat([df_main, df_total], ignore_index=True)
