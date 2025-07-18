@@ -329,7 +329,9 @@ def parse_oa(file):
             wire_configs = list(dict.fromkeys(wire_configs))
             if wire_configs:
                 calib_parts = wire_configs + calib_parts
-            calib_data    = 'Y' if calib_parts else 'N'
+            # ✅ Deduplicate calibration entries while preserving order
+            calib_parts = list(dict.fromkeys(calib_parts))
+            calib_data  = 'Y' if calib_parts else 'N'
             calib_details = ", ".join(calib_parts)
 
             data.append({
