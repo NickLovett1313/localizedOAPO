@@ -14,7 +14,7 @@ def parse_po(file):
     if stop_match:
         order_total = stop_match.group(1).strip()
 
-    # cut off after GST or order total
+    # truncate after GST or order total marker
     gst_match = re.search(r'SPARTAN.*?GST#.*', text, re.IGNORECASE)
     if gst_match:
         pos = text.lower().find(gst_match.group(0).lower()) + len(gst_match.group(0))
@@ -22,7 +22,7 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # split into line‐item blocks
+    # split into line‐item blocks by line number
     blocks = re.split(r'\n(0*\d{4,5})', text)
 
     for i in range(1, len(blocks) - 1, 2):
@@ -34,15 +34,15 @@ def parse_po(file):
         if ln <= 0:
             continue
 
-        # model number
+        # Model Number
         model_m   = re.search(r'([A-Z0-9\-_]{6,})', block)
         model_str = model_m.group(1) if model_m else ''
 
-        # ship date
+        # Ship Date
         ship_date_m = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
         ship_date   = ship_date_m.group(1) if ship_date_m else ''
 
-        # qty / pricing
+        # Qty / Unit Price / Total Price
         qty = unit_price = total_price = ""
         m = re.search(r'(\d+)\s+EA\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
         if m:
@@ -50,8 +50,8 @@ def parse_po(file):
 
         # TAG section (unchanged)
         tag_section = ""
-        tag_hdr = re.search(r'\bTag(?:s)?\b', block, re.IGNORECASE)
-        sold_to = re.search(r'\bSold To\b', block, re.IGNORECASE)
+        tag_hdr     = re.search(r'\bTag(?:s)?\b', block, re.IGNORECASE)
+        sold_to     = re.search(r'\bSold To\b', block, re.IGNORECASE)
         if tag_hdr:
             start = tag_hdr.end()
             end   = sold_to.start() if sold_to else len(block)
@@ -73,43 +73,68 @@ def parse_po(file):
             norm = raw.upper()
             if norm in comp_parts:
                 continue
-            is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm))
-            is_all_digits= bool(re.fullmatch(r'[\d\-]+', norm))
-            has_letter   = bool(re.search(r'[A-Z]', norm))
-            has_digit    = bool(re.search(r'\d', norm))
+            is_date       = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm))
+            is_all_digits = bool(re.fullmatch(r'[\d\-]+', norm))
+            has_letter    = bool(re.search(r'[A-Z]', norm))
+            has_digit     = bool(re.search(r'\d', norm))
             if has_letter and has_digit and not is_date and not is_all_digits:
                 tags.append(norm)
 
-        tags   = list(dict.fromkeys(tags))
+        tags    = list(dict.fromkeys(tags))
         has_tag = 'Y' if tags else 'N'
 
         # ── CALIBRATION SECTION – BELOW "ADDITIONAL INFORMATION" ──
-        calib_parts = []
-        block_lines = [line.strip() for line in block.split('\n') if line.strip()]
-        # find header
-        add_info_start = next(
-            (idx for idx, line in enumerate(block_lines)
-             if re.search(r'Additional Information', line, re.IGNORECASE)),
+        calib_parts   = []
+        wire_configs  = []
+        block_lines   = [ln.strip() for ln in block.split('\n') if ln.strip()]
+        add_idx = next(
+            (idx for idx, ln in enumerate(block_lines)
+             if re.search(r'Additional Information', ln, re.IGNORECASE)),
             None
         )
-        if add_info_start is not None:
-            for line in block_lines[add_info_start + 1:]:
-                if re.search(r'Sold To|Ship To', line, re.IGNORECASE):
+        if add_idx is not None:
+            for offset, ln_text in enumerate(block_lines[add_idx + 1:]):
+                idx_line = add_idx + 1 + offset
+                # stop when hitting tags or addresses
+                if re.search(r'\bTag(?:s)?\b|Sold To|Ship To', ln_text, re.IGNORECASE):
                     break
-                # skip invalid 2-wire
-                if '2-wire' in line.lower():
+                # skip spurious "2-wire"
+                if '2-wire' in ln_text.lower():
                     continue
-                # extract numeric ranges + units
-                for start, end in re.findall(r'(-?\d+(?:\.\d+)?)\s*to\s*(-?\d+(?:\.\d+)?)', line):
-                    um = re.search(r'to\s*-?\d+(?:\.\d+)?\s*([^\d].+)', line)
-                    unit = um.group(1).strip() if um else ''
-                    calib_parts.append(f"{start} to {end} {unit}".strip())
-                # extract any wire-RTD configs
-                wm = re.search(r'(\d)-wire\s*RTD', line, re.IGNORECASE)
-                if wm:
-                    calib_parts.insert(0, f"{wm.group(1)}-wire RTD")
 
-        # dedupe & flag
+                # wire-RTD configs
+                wm = re.search(r'(\d)-wire\s*RTD', ln_text, re.IGNORECASE)
+                if wm:
+                    cfg = f"{wm.group(1)}-wire RTD"
+                    wire_configs.append(cfg)
+
+                # numeric ranges + unit from next line
+                ranges = re.findall(r'(-?\d+(?:\.\d+)?)\s*to\s*(-?\d+(?:\.\d+)?)', ln_text)
+                if ranges:
+                    unit_clean = ""
+                    if idx_line + 1 < len(block_lines):
+                        um = re.search(
+                            r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
+                            block_lines[idx_line + 1].upper()
+                        )
+                        if um:
+                            unit_clean = um.group(0).strip()
+                    for start, end in ranges:
+                        calib_parts.append(f"{start} to {end} {unit_clean}".strip())
+
+        # if no explicit wire configs but "wire" exists, capture broadly
+        if not wire_configs and any('WIRE' in ln.upper() for ln in block_lines):
+            for w in re.findall(r'(\d)-wire', "\n".join(block_lines), re.IGNORECASE):
+                cfg = f"{w}-wire RTD"
+                if cfg not in wire_configs:
+                    wire_configs.append(cfg)
+
+        # combine wire configs first
+        if wire_configs:
+            calib_parts = wire_configs + calib_parts
+
+        # dedupe calibration entries
+        calib_parts   = [part for part in calib_parts if part]
         calib_parts   = list(dict.fromkeys(calib_parts))
         calib_data    = 'Y' if calib_parts else ''
         calib_details = ", ".join(calib_parts)
@@ -128,7 +153,7 @@ def parse_po(file):
             'Calib Details': calib_details
         })
 
-    # build DataFrame & filter
+    # build DataFrame & apply filters
     df = pd.DataFrame(data)
     df = df[
         (pd.to_numeric(df['Line No'], errors='coerce') <= 10000) &
@@ -137,25 +162,23 @@ def parse_po(file):
         (df['Total Price'].str.strip() != '')
     ].copy()
 
-    # append order total row if present
+    # append ORDER TOTAL row if found
     if order_total:
-        df = pd.concat([df,
-            pd.DataFrame([{
-                'Line No':       '',
-                'Model Number':  'ORDER TOTAL',
-                'Ship Date':     '',
-                'Qty':           '',
-                'Unit Price':    '',
-                'Total Price':   order_total,
-                'Has Tag?':      '',
-                'Tags':          '',
-                'Wire-on Tag':   '',
-                'Calib Data?':   '',
-                'Calib Details': ''
-            }])
-        ], ignore_index=True)
+        df = pd.concat([df, pd.DataFrame([{
+            'Line No':       '',
+            'Model Number':  'ORDER TOTAL',
+            'Ship Date':     '',
+            'Qty':           '',
+            'Unit Price':    '',
+            'Total Price':   order_total,
+            'Has Tag?':      '',
+            'Tags':          '',
+            'Wire-on Tag':   '',
+            'Calib Data?':   '',
+            'Calib Details': ''
+        }])], ignore_index=True)
 
-    # sort and return
+    # final sort
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
