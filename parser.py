@@ -286,10 +286,6 @@ def parse_oa(file):
             # Compute wire-on tags
             wire_on_tags = [t for t in tags if '/' in t]
 
-            # ── NEW FILTER: drop any incomplete split tags ending in '-' ──
-            tags = [t for t in tags if not t.endswith('-')]
-            wire_on_tags = [t for t in wire_on_tags if not t.endswith('-')]
-
             # ── POST-PROCESSING FOR QTY == 1 ──
             if qty.isdigit() and int(qty) == 1:
                 slash_tags = [t for t in tags if '/' in t]
@@ -372,6 +368,10 @@ def parse_oa(file):
         lambda s: ", ".join(dict.fromkeys([t.strip() for t in s.split(',') if t.strip()]))
     )
 
+    # ── NEW CLEANUP: normalize out spaces around slashes in both columns ──
+    df['Tags'] = df['Tags'].str.replace(r'\s*/\s*', '/', regex=True)
+    df['Wire-on Tag'] = df['Wire-on Tag'].str.replace(r'\s*/\s*', '/', regex=True)
+
     # 11) Final sort
     df_main  = df[df['Model Number']!='ORDER TOTAL'].copy()
     df_total = df[df['Model Number']=='ORDER TOTAL'].copy()
@@ -382,7 +382,6 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
-
 
 
 
