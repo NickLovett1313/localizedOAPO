@@ -71,10 +71,8 @@ def parse_po(file):
         tags = slash_comps.copy()
         for raw in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_section):
             norm = raw.upper()
-            # skip if it's part of a slash-compound
             if norm in comp_parts:
                 continue
-            # filter out dates or all-digits
             is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm))
             is_all_digits= bool(re.fullmatch(r'[\d\-]+', norm))
             has_letter   = bool(re.search(r'[A-Z]', norm))
@@ -86,43 +84,38 @@ def parse_po(file):
         tags = list(dict.fromkeys(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ── Calibration detection (full version) ──
+        # ── Calibration detection with inline unit scan ──
         calib_parts = []
         wire_configs = []
         lines = [line.strip() for line in block.split('\n') if line.strip()]
 
         for idx, line in enumerate(lines):
-            # Detect ranges
-            if re.search(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', line):
-                ranges = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', line)
-                unit = ""
-                if idx+1 < len(lines):
-                    um = re.search(
-                        r'(DEG\s*[CFK]?|°C|°F|KPA|KPAG|PSI|BAR|MBAR)',
-                        lines[idx+1].upper()
-                    )
-                    if um:
-                        unit = um.group(0).strip().upper()
-                for r in ranges:
+            # Find all range patterns
+            range_matches = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', line)
+            if range_matches:
+                # Scan same line for units
+                unit_match = re.search(
+                    r'(DEG\s*[CFK]?|°C|°F|KPA|KPAG|PSI|BAR|MBAR|KMH|MPH|FLOW|LPM|SLPM|°F|°C)',
+                    line.upper()
+                )
+                unit = unit_match.group(0).strip().upper() if unit_match else ""
+                for r in range_matches:
                     calib_parts.append(f"{r} {unit}".strip())
 
-            # Detect wire types from values like "1 3" or "3-WIRE"
+            # Wire type detection
             if re.search(r'\b1[2-5]\b', line):
                 matches = re.findall(r'\b1([2-5])\b', line)
                 for w in matches:
                     wire_configs.append(f"{w}-wire RTD")
-
             if re.search(r'\b([2-5])-?WIRE\b', line.upper()):
                 wire_match = re.findall(r'\b([2-5])-?WIRE\b', line.upper())
                 for w in wire_match:
                     wire_configs.append(f"{w}-wire RTD")
 
-        # Append wire types to the beginning of calibration list
+        # Combine and dedupe
         wire_configs = list(dict.fromkeys(wire_configs))
         if wire_configs:
             calib_parts = wire_configs + calib_parts
-
-        # ✅ Final cleanup and dedup
         calib_parts = [part.strip() for part in calib_parts if part.strip()]
         calib_parts = list(dict.fromkeys(calib_parts))
         calib_data  = 'Y' if calib_parts else 'N'
@@ -137,12 +130,12 @@ def parse_po(file):
             'Total Price':   total_price,
             'Has Tag?':      has_tag,
             'Tags':          ", ".join(tags),
-            'Wire-on Tag':   "",  # still blank
+            'Wire-on Tag':   "",
             'Calib Data?':   calib_data,
             'Calib Details': calib_detail
         })
 
-    # 🔒 Hard Cleanup Step
+    # Cleanup
     df = pd.DataFrame(data)
     df = df[
         (pd.to_numeric(df['Line No'], errors='coerce') <= 10000) &
@@ -151,7 +144,6 @@ def parse_po(file):
         (df['Total Price'].str.strip() != '')
     ].copy()
 
-    # 11) Append order total if present
     if order_total:
         df = pd.concat([df, pd.DataFrame([{
             'Line No':       '',
@@ -167,7 +159,6 @@ def parse_po(file):
             'Calib Details': ''
         }])], ignore_index=True)
 
-    # 12) Final sort
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
     df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
