@@ -6,16 +6,13 @@ def parse_po(file):
     data = []
     order_total = ""
 
-    # 1) Read full PDF text
     with pdfplumber.open(file) as pdf:
         text = "\n".join(p.extract_text() or "" for p in pdf.pages)
 
-    # 2) Extract the USD order total
     stop_match = re.search(r'Order total.*?\$?USD.*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
 
-    # 3) Crop at Spartan GST# or Order Total line
     gst_match = re.search(r'SPARTAN.*?GST#.*', text, re.IGNORECASE)
     if gst_match:
         pos = text.lower().find(gst_match.group(0).lower()) + len(gst_match.group(0))
@@ -23,7 +20,6 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by line number
     blocks = re.split(r'\n(0*\d{4,5})', text)
 
     for i in range(1, len(blocks) - 1, 2):
@@ -35,7 +31,6 @@ def parse_po(file):
         if ln <= 0:
             continue
 
-        # extract model, dates, pricing
         model_m    = re.search(r'([A-Z0-9\-_]{6,})', block)
         model_str  = model_m.group(1) if model_m else ''
         ship_date_m = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
@@ -45,7 +40,6 @@ def parse_po(file):
         if m:
             qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-        # ── Isolate only the text under the "Tag(s)" heading and before "Sold To:" ──
         tag_section = ""
         tag_hdr = re.search(r'\bTag(?:s)?\b', block, re.IGNORECASE)
         sold_to = re.search(r'\bSold To\b', block, re.IGNORECASE)
@@ -54,20 +48,17 @@ def parse_po(file):
             end   = sold_to.start() if sold_to else len(block)
             tag_section = block[start:end]
 
-        # ── SLASH-COMPOUND TAGS ──
         slash_comps = []
         for raw in re.findall(r'\b[A-Z0-9\-_]+\s*/\s*[A-Z0-9\-]+(?:-NC)?\b', tag_section, re.IGNORECASE):
             comp = re.sub(r'\s*/\s*', '/', raw.upper())
             slash_comps.append(comp)
 
-        # build set of any parts of those compounds to skip
         comp_parts = set()
         for comp in slash_comps:
             left, right = comp.split('/', 1)
             comp_parts.add(left)
             comp_parts.add(right)
 
-        # ── GENERIC TAGS ──
         tags = slash_comps.copy()
         for raw in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_section):
             norm = raw.upper()
@@ -83,43 +74,25 @@ def parse_po(file):
         tags = list(dict.fromkeys(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ── Calibration detection from "Additional Information" only ──
-        calib_parts = []
-        wire_configs = []
-        lines = [line.strip() for line in block.split('\n') if line.strip()]
-
-        # Only scan lines under "Additional Information"
-        additional_start = None
-        for idx, line in enumerate(lines):
+        # CALIBRATION SECTION – BELOW "ADDITIONAL INFORMATION"
+        calib_details = []
+        block_lines = [line.strip() for line in block.split('\n') if line.strip()]
+        add_info_start = None
+        for idx, line in enumerate(block_lines):
             if "Additional Information" in line:
-                additional_start = idx
+                add_info_start = idx
                 break
-
-        if additional_start is not None:
-            for line in lines[additional_start + 1:]:
-                if "Sold To" in line:
+        if add_info_start is not None:
+            for line in block_lines[add_info_start + 1:]:
+                if "Sold To" in line or "Ship To" in line:
                     break
-
-                # Capture any "X to Y" with whatever unit is in the line
-                range_matches = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', line)
-                if range_matches:
-                    for r in range_matches:
-                        # Capture the full line if range is present
-                        calib_parts.append(f"{r} {line}".strip())
-
-                # Capture only 3-, 4-, or 5-wire RTD (never 2-wire)
-                wire_match = re.findall(r'\b([3-5])[-\s]?wire\b', line, re.IGNORECASE)
-                for w in wire_match:
-                    wire_configs.append(f"{w}-wire RTD")
-
-        # Merge & dedupe
-        wire_configs = list(dict.fromkeys(wire_configs))
-        if wire_configs:
-            calib_parts = wire_configs + calib_parts
-        calib_parts = [part.strip() for part in calib_parts if part.strip()]
-        calib_parts = list(dict.fromkeys(calib_parts))
-        calib_data  = 'Y' if calib_parts else 'N'
-        calib_detail = ", ".join(calib_parts)
+                if "2-wire" in line.lower():
+                    continue
+                line_clean = line.strip()
+                if line_clean:
+                    calib_details.append(line_clean)
+        calib_details = list(dict.fromkeys(calib_details))  # Dedupe
+        calib_data = 'Y' if calib_details else ''
 
         data.append({
             'Line No':       ln,
@@ -132,10 +105,9 @@ def parse_po(file):
             'Tags':          ", ".join(tags),
             'Wire-on Tag':   "",
             'Calib Data?':   calib_data,
-            'Calib Details': calib_detail
+            'Calib Details': ", ".join(calib_details)
         })
 
-    # Cleanup
     df = pd.DataFrame(data)
     df = df[
         (pd.to_numeric(df['Line No'], errors='coerce') <= 10000) &
@@ -160,12 +132,13 @@ def parse_po(file):
         }])], ignore_index=True)
 
     df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
-    df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
+    df_total = df[df['Model Number'] == 'ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
 
 def parse_oa(file):
