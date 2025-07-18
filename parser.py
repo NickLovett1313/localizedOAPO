@@ -286,11 +286,12 @@ def parse_oa(file):
             # Compute wire-on tags
             wire_on_tags = [t for t in tags if '/' in t]
 
-            # ── TINY CHANGE: drop any trailing-hyphen splinters & prefer true compounds ──
-            tags = [t for t in tags if not t.endswith('-')]
-            slash_compounds = [t for t in tags if '/' in t]
-            if slash_compounds:
-                tags = slash_compounds
+            # ── NEW POST-PROCESSING FOR QTY==1 ──
+            if qty.isdigit() and int(qty) == 1:
+                slash_tags = [t for t in tags if '/' in t]
+                if slash_tags:
+                    tags = slash_tags
+                    wire_on_tags = slash_tags
 
             # Dedupe & replicate by quantity
             tags = list(dict.fromkeys(tags))
@@ -360,7 +361,7 @@ def parse_oa(file):
             'Calib Details': ''
         }])], ignore_index=True)
 
-    # Remove duplicate tags in column
+    # — Remove duplicate in Tags column —
     df['Tags'] = df['Tags'].apply(
         lambda s: ", ".join(dict.fromkeys([t.strip() for t in s.split(',') if t.strip()]))
     )
