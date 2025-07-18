@@ -304,7 +304,7 @@ def parse_oa(file):
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
             has_tag = 'Y' if tags else 'N'
 
-            # === Calibration/configuration logic (with deduplication) ===
+            # Calibration/configuration logic (unchanged) …
             calib_parts  = []
             wire_configs = []
             for idx3, ln3 in enumerate(lines_clean):
@@ -329,11 +329,7 @@ def parse_oa(file):
             wire_configs = list(dict.fromkeys(wire_configs))
             if wire_configs:
                 calib_parts = wire_configs + calib_parts
-
-            # ✅ Deduplicate calibration entries
-            calib_parts = [part.strip() for part in calib_parts if part.strip()]
-            calib_parts = list(dict.fromkeys(calib_parts))
-            calib_data  = 'Y' if calib_parts else 'N'
+            calib_data    = 'Y' if calib_parts else 'N'
             calib_details = ", ".join(calib_parts)
 
             data.append({
@@ -385,7 +381,3 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
-
-
-
-
