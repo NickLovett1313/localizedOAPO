@@ -8,7 +8,7 @@ def parse_po(file):
 
     # 1) Read full PDF text
     with pdfplumber.open(file) as pdf:
-        text = "\n".join([p.extract_text() or "" for p in pdf.pages])
+        text = "\n".join(p.extract_text() or "" for p in pdf.pages)
 
     # 2) Extract the USD order total
     stop_match = re.search(r'Order total.*?\$?USD.*?([\d,]+\.\d{2})', text, re.IGNORECASE)
@@ -36,54 +36,44 @@ def parse_po(file):
         if ln <= 0:
             continue
 
+        # Model & dates & pricing
         model     = re.search(r'([A-Z0-9\-_]{6,})', block)
         ship_date = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
-
-        qty = unit_price = total_price = ""
         m = re.search(r'(\d+)\s+EA\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+        qty = unit_price = total_price = ""
         if m:
             qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
-
         model_str = model.group(1) if model else ''
 
-        tags_found = re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block)
-        tags = []
-        for t in tags_found:
-            is_model     = model_str and t == model_str
-            is_cve       = 'CVE' in t or 'TSE' in t
-            has_letters  = bool(re.search(r'[A-Z]', t))
-            has_digits   = bool(re.search(r'\d', t))
-            is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
-            is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t)
-                              or re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', t)
-                              or re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', t))
-            ok_len       = 5 <= len(t) <= 30
-            if not (is_model or is_cve or is_all_digits or is_date) and has_letters and has_digits and ok_len:
-                tags.append(t)
-        tags = list(set(tags))
-        has_tag = 'Y' if tags else 'N'
+        # ─── SLASH-COMPOUND TAGS ───
+        slash_comps = []
+        for raw in re.findall(r'\b[A-Z0-9\-_]+\s*/\s*[A-Z0-9\-]+(?:-NC)?\b', block, re.IGNORECASE):
+            comp = re.sub(r'\s*/\s*', '/', raw.upper())
+            slash_comps.append(comp)
 
-        calib_parts  = []
-        wire_configs = []
-        for line in block.split('\n'):
-            if 'RANGE:' in line.upper():
-                parts = line.split('Range:')[-1].strip()
-                wm = re.search(r'([2-5])-WIRE', parts, re.IGNORECASE)
-                if wm:
-                    wire_configs.append(f"{wm.group(1)}-wire RTD")
-                pc = re.sub(r'([2-5])-WIRE RTD[:\s]*', '', parts, flags=re.IGNORECASE)
-                pc = re.sub(r'([2-5])-WIRE[:\s]*', '', pc, flags=re.IGNORECASE)
-                rm = re.search(r'-?\d+\s*to\s*-?\d+.*', pc)
-                if rm:
-                    val = rm.group(0).strip()
-                    val = re.sub(r'deg c', 'DEG C', val, flags=re.IGNORECASE)
-                    val = re.sub(r'kpag', 'KPAG', val, flags=re.IGNORECASE)
-                    calib_parts.append(val)
-        wire_configs = list(set(wire_configs))
-        if wire_configs:
-            calib_parts = wire_configs + calib_parts
-        calib_data    = 'Y' if calib_parts else 'N'
-        calib_details = ", ".join(calib_parts)
+        # ─── GENERIC TAGS ───
+        tags = slash_comps.copy()
+        for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', block):
+            norm = t.upper()
+            if norm in slash_comps:
+                continue
+            # existing filters
+            is_model     = model_str and norm == model_str
+            is_cve       = 'CVE' in norm or 'TSE' in norm
+            has_letters  = bool(re.search(r'[A-Z]', norm))
+            has_digits   = bool(re.search(r'\d', norm))
+            is_all_digits= bool(re.fullmatch(r'[\d\-]+', norm))
+            is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm) or
+                              re.search(r'[A-Za-z]{3} \d{1,2}, \d{4}', norm) or
+                              re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', norm))
+            ok_len       = 5 <= len(norm) <= 30
+
+            if not (is_model or is_cve or is_all_digits or is_date) and has_letters and has_digits and ok_len:
+                tags.append(norm)
+
+        # ─── DEDUPE & FINALIZE ───
+        tags = list(dict.fromkeys(tags))
+        has_tag = 'Y' if tags else 'N'
 
         data.append({
             'Line No':       ln,
@@ -95,14 +85,12 @@ def parse_po(file):
             'Has Tag?':      has_tag,
             'Tags':          ", ".join(tags),
             'Wire-on Tag':   '',
-            'Calib Data?':   calib_data,
-            'Calib Details': calib_details
+            'Calib Data?':   '',
+            'Calib Details': ''
         })
 
-    # 10) Build DataFrame
-    df = pd.DataFrame(data)
-
     # 🔒 Hard Cleanup Step
+    df = pd.DataFrame(data)
     df = df[
         (pd.to_numeric(df['Line No'], errors='coerce') <= 10000) &
         (df['Qty'].str.strip() != '') &
@@ -134,6 +122,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
 import pdfplumber
 import pandas as pd
