@@ -170,7 +170,7 @@ def parse_oa(file):
                 'Tags':          '',
                 'Wire-on Tag':   '',
                 'Calib Data?':   '',
-                'Calib Details':''
+                'Calib Details': ''
             })
 
     # 3) Pull off the final total
@@ -212,7 +212,7 @@ def parse_oa(file):
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-            # === TAG SECTION LOGIC ===
+            # === TAG SECTION LOGIC (updated) ===
             tags = []
             wire_on_tags = []
             skip_ic_codes = set()
@@ -230,19 +230,24 @@ def parse_oa(file):
                 tags.append(name_tag)
             else:
                 if contains_tag_section:
-                    # 1) Compound tags
-                    raw_compounds = re.findall(r'\b[A-Z0-9\-]+/\s*IC\d{2,5}-NC\b', tag_block, re.IGNORECASE)
+                    # 1) Flexible slash-compound tags (capture entire TT-P0102/IC0063-NC etc.)
+                    raw_compounds = re.findall(
+                        r'\b[A-Z0-9\-_]+(?:\s*/\s*IC\d{2,5}-NC)\b',
+                        tag_block, re.IGNORECASE
+                    )
                     for raw in raw_compounds:
-                        norm = re.sub(r'/\s*', '/', raw.upper())
+                        norm = re.sub(r'\s*/\s*', '/', raw.upper())
                         if cust_po and (norm == cust_po or norm.startswith(cust_po)):
                             continue
                         tags.append(norm)
-                        skip_ic_codes.add(norm.split('/',1)[1])
-                    # 2) Remove compounds before original tag regex
+                        skip_ic_codes.add(norm.split('/', 1)[1])
+
+                    # remove compounds to avoid splitting them
                     temp_block = tag_block
-                    for c in raw_compounds:
-                        temp_block = re.sub(re.escape(c), ' ', temp_block, flags=re.IGNORECASE)
-                    # 3) Original tag extraction
+                    for raw in raw_compounds:
+                        temp_block = re.sub(re.escape(raw), ' ', temp_block, flags=re.IGNORECASE)
+
+                    # 2) Original tag extraction
                     for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp_block):
                         if cust_po and (t == cust_po or t.startswith(cust_po)):
                             continue
@@ -253,25 +258,21 @@ def parse_oa(file):
                         ok_len       = 5 <= len(t) <= 50
                         if has_letters and has_digits and not is_all_digits and not is_date and ok_len:
                             tags.append(t)
-                    # 4) Combine split-across-lines IC tags
-                    for idx2 in range(len(lines_clean)-1):
-                        combo = f"{lines_clean[idx2]}/{lines_clean[idx2+1]}"
-                        if re.fullmatch(r'[A-Z0-9\-]+/IC\d{2,5}-NC', combo, re.IGNORECASE):
-                            norm = combo.replace('/ ', '/').upper()
-                            if norm not in tags:
-                                tags.append(norm)
-                                skip_ic_codes.add(norm.split('/',1)[1])
-                    # 5) Wire-on tags
+
+                    # 3) Wire-on tags
                     for idx2, ln2 in enumerate(lines_clean):
                         if 'WIRE' in ln2.upper() and idx2 + 1 < len(lines_clean):
-                            for p in lines_clean[idx2+1].split('/'):
+                            for p in lines_clean[idx2 + 1].split('/'):
                                 p = p.strip()
-                                if p and p in tags:
-                                    wire_on_tags.append(p)
-                    # 6) Limit to first if qty==1
+                                norm = re.sub(r'\s*/\s*', '/', p.upper())
+                                if norm and norm in tags:
+                                    wire_on_tags.append(norm)
+
+                    # 4) Limit to first if qty == 1
                     if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
                         tags = tags[:1]
-                # Universal IC/NC detection
+
+                # Universal IC/NC detection, skip compounds
                 for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b', block, re.IGNORECASE)):
                     icn = ic.upper()
                     if icn in skip_ic_codes:
@@ -287,12 +288,12 @@ def parse_oa(file):
                 tags = [t for t in tags for _ in range(int(qty))]
                 wire_on_tags = [w for w in wire_on_tags for _ in range(int(qty))]
 
-            # ─── NEW FILTER: keep only unique wire-on tags ───
+            # ─── NEW: ensure only unique wire-on tags ───
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
             has_tag = 'Y' if tags else 'N'
 
-            # Calibration/configuration logic
+            # Calibration/configuration logic (unchanged)
             calib_parts  = []
             wire_configs = []
             for idx3, ln3 in enumerate(lines_clean):
@@ -300,8 +301,7 @@ def parse_oa(file):
                     ranges = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3)
                     unit_clean = ""
                     if idx3 + 1 < len(lines_clean):
-                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
-                                       lines_clean[idx3+1].upper())
+                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines_clean[idx3+1].upper())
                         if um:
                             unit_clean = um.group(0).strip().upper()
                     if idx3 + 2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx3+2].strip()):
@@ -367,5 +367,6 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
 
 
