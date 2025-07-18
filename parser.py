@@ -53,21 +53,28 @@ def parse_po(file):
             start = tag_hdr.end()
             end   = sold_to.start() if sold_to else len(block)
             tag_section = block[start:end]
-        # else leave tag_section empty
 
         # ── SLASH-COMPOUND TAGS ──
         slash_comps = []
-        for raw in re.findall(r'\b[A-Z0-9\-_]+\s*/\s*[A-Z0-9\-]+\b', tag_section, re.IGNORECASE):
+        for raw in re.findall(r'\b[A-Z0-9\-_]+\s*/\s*[A-Z0-9\-]+(?:-NC)?\b', tag_section, re.IGNORECASE):
             comp = re.sub(r'\s*/\s*', '/', raw.upper())
             slash_comps.append(comp)
+
+        # build set of any parts of those compounds to skip
+        comp_parts = set()
+        for comp in slash_comps:
+            left, right = comp.split('/', 1)
+            comp_parts.add(left)
+            comp_parts.add(right)
 
         # ── GENERIC TAGS ──
         tags = slash_comps.copy()
         for raw in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_section):
             norm = raw.upper()
-            if norm in slash_comps:
+            # skip if it's part of a slash-compound
+            if norm in comp_parts:
                 continue
-            # filter out pure dates or numbers-only
+            # filter out dates or all-digits
             is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm))
             is_all_digits= bool(re.fullmatch(r'[\d\-]+', norm))
             has_letter   = bool(re.search(r'[A-Z]', norm))
@@ -88,7 +95,7 @@ def parse_po(file):
             'Total Price':   total_price,
             'Has Tag?':      has_tag,
             'Tags':          ", ".join(tags),
-            'Wire-on Tag':   "",  # keep blank or handle separately if needed
+            'Wire-on Tag':   "",  # still blank
             'Calib Data?':   '',
             'Calib Details': ''
         })
