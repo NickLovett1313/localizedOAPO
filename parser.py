@@ -212,17 +212,16 @@ def parse_oa(file):
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-            # === TAG SECTION LOGIC (updated) ===
+            # === TAG SECTION LOGIC ===
             tags = []
-            wire_on_tags = []
-            skip_ic_codes = set()
+            skip_ic = set()
 
-            # 0) NAME line logic
+            # 0) NAME-line override
             name_tag = None
             for idx, ln in enumerate(lines_clean):
                 if re.match(r'^NAME\s*[:\s]*$', ln, re.IGNORECASE):
                     if idx + 1 < len(lines_clean):
-                        cand = lines_clean[idx + 1].strip()
+                        cand = lines_clean[idx+1].strip()
                         if cand:
                             name_tag = cand.upper()
                     break
@@ -230,70 +229,56 @@ def parse_oa(file):
                 tags.append(name_tag)
             else:
                 if contains_tag_section:
-                    # 1) Flexible slash-compound tags (capture entire TT-P0102/IC0063-NC etc.)
-                    raw_compounds = re.findall(
+                    # 1) Grab whole-string slash tags (flexible spaces around the slash)
+                    raw_comps = re.findall(
                         r'\b[A-Z0-9\-_]+(?:\s*/\s*IC\d{2,5}-NC)\b',
                         tag_block, re.IGNORECASE
                     )
-                    for raw in raw_compounds:
-                        norm = re.sub(r'\s*/\s*', '/', raw.upper())
-                        if cust_po and (norm == cust_po or norm.startswith(cust_po)):
+                    # normalize to e.g. "TT-P0102/IC0063-NC"
+                    compounds = [re.sub(r'\s*/\s*','/',r.upper()) for r in raw_comps]
+                    for comp in compounds:
+                        if cust_po and (comp == cust_po or comp.startswith(cust_po)):
                             continue
-                        tags.append(norm)
-                        skip_ic_codes.add(norm.split('/', 1)[1])
+                        tags.append(comp)
+                        skip_ic.add(comp.split('/',1)[1])
 
-                    # remove compounds to avoid splitting them
-                    temp_block = tag_block
-                    for raw in raw_compounds:
-                        temp_block = re.sub(re.escape(raw), ' ', temp_block, flags=re.IGNORECASE)
+                    # 2) Strip those compounds out before the generic-tag regex
+                    temp = tag_block
+                    for raw in raw_comps:
+                        temp = re.sub(re.escape(raw), ' ', temp, flags=re.IGNORECASE)
 
-                    # 2) Original tag extraction
-                    for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp_block):
+                    # 3) The regular generic tags
+                    for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp):
                         if cust_po and (t == cust_po or t.startswith(cust_po)):
                             continue
-                        has_letters  = bool(re.search(r'[A-Z]', t))
-                        has_digits   = bool(re.search(r'\d', t))
-                        is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
-                        is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t))
-                        ok_len       = 5 <= len(t) <= 50
-                        if has_letters and has_digits and not is_all_digits and not is_date and ok_len:
+                        if (bool(re.search(r'[A-Z]',t))
+                            and bool(re.search(r'\d',t))
+                            and not re.fullmatch(r'[\d\-]+',t)
+                            and not re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}',t)
+                            and 5 <= len(t) <= 50):
                             tags.append(t)
 
-                    # 3) Wire-on tags
-                    for idx2, ln2 in enumerate(lines_clean):
-                        if 'WIRE' in ln2.upper() and idx2 + 1 < len(lines_clean):
-                            for p in lines_clean[idx2 + 1].split('/'):
-                                p = p.strip()
-                                norm = re.sub(r'\s*/\s*', '/', p.upper())
-                                if norm and norm in tags:
-                                    wire_on_tags.append(norm)
-
-                    # 4) Limit to first if qty == 1
-                    if qty.isdigit() and int(qty) == 1 and len(tags) > 1:
-                        tags = tags[:1]
-
-                # Universal IC/NC detection, skip compounds
+                # 4) Universal IC detection (no slash compounds)
                 for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b', block, re.IGNORECASE)):
                     icn = ic.upper()
-                    if icn in skip_ic_codes:
-                        continue
-                    tags.append(icn)
-                    if any('WIRE' in ln.upper() for ln in lines_clean):
-                        wire_on_tags.append(icn)
+                    if icn not in skip_ic:
+                        tags.append(icn)
+
+            # ── NOW: compute wire-on tags simply as the compound tags ──
+            #     (i.e. anything in `tags` containing a slash)
+            wire_on_tags = [t for t in tags if '/' in t]
 
             # Dedupe & replicate by quantity
             tags = list(dict.fromkeys(tags))
-            wire_on_tags = list(dict.fromkeys(wire_on_tags))
             if qty.isdigit() and int(qty) > 1:
                 tags = [t for t in tags for _ in range(int(qty))]
-                wire_on_tags = [w for w in wire_on_tags for _ in range(int(qty))]
 
-            # ─── NEW: ensure only unique wire-on tags ───
+            # wire-on tags stay unique (no replication)
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
             has_tag = 'Y' if tags else 'N'
 
-            # Calibration/configuration logic (unchanged)
+            # Calibration/config logic (unchanged) …
             calib_parts  = []
             wire_configs = []
             for idx3, ln3 in enumerate(lines_clean):
@@ -301,7 +286,8 @@ def parse_oa(file):
                     ranges = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3)
                     unit_clean = ""
                     if idx3 + 1 < len(lines_clean):
-                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines_clean[idx3+1].upper())
+                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
+                                       lines_clean[idx3+1].upper())
                         if um:
                             unit_clean = um.group(0).strip().upper()
                     if idx3 + 2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx3+2].strip()):
@@ -335,7 +321,7 @@ def parse_oa(file):
     # 9) Append surcharge rows
     data.extend(tariff_rows)
 
-    # 10) Build DataFrame & append ORDER TOTAL
+    # 10) DataFrame & ORDER TOTAL
     df = pd.DataFrame(data)
     if order_total:
         df = pd.concat([df, pd.DataFrame([{
@@ -352,7 +338,7 @@ def parse_oa(file):
             'Calib Details': ''
         }])], ignore_index=True)
 
-    # — Remove duplicate tags —
+    # — Remove duplicate in Tags column —
     df['Tags'] = df['Tags'].apply(
         lambda s: ", ".join(dict.fromkeys([t.strip() for t in s.split(',') if t.strip()]))
     )
