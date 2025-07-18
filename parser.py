@@ -179,7 +179,7 @@ def parse_oa(file):
         order_total = stop_match.group(1).strip()
         text = text.split(stop_match.group(0))[0]
 
-    # 4) Split into blocks by 5-digit OA line numbers (including slash-groups)
+    # 4) Split into blocks by 5-digit OA line numbers
     blocks = re.split(r'\n(\d{5}(?:/\d{5})*)', text)
     for i in range(1, len(blocks) - 1, 2):
         raw_line_no = blocks[i].strip()
@@ -197,23 +197,23 @@ def parse_oa(file):
 
         for line_no in line_nos:
             # Model Number
-            model_m = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
-            model   = model_m.group(0) if model_m else ""
+            model_m   = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
+            model     = model_m.group(0) if model_m else ""
 
             # Ship Date
-            sd = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
+            sd        = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
             ship_date = sd.group(1) if sd else (
-                (re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block) or [None, ""])[1]
-            )
+                          (re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block) or [None, ""])[1]
+                        )
 
             # Qty / Unit / Total
             qty = unit_price = total_price = ""
-            m2 = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+            m2  = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
             if m2:
                 qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
             # === TAG SECTION LOGIC ===
-            tags = []
+            tags    = []
             skip_ic = set()
 
             # 0) NAME-line override
@@ -221,7 +221,7 @@ def parse_oa(file):
             for idx, ln in enumerate(lines_clean):
                 if re.match(r'^NAME\s*[:\s]*$', ln, re.IGNORECASE):
                     if idx + 1 < len(lines_clean):
-                        cand = lines_clean[idx+1].strip()
+                        cand = lines_clean[idx + 1].strip()
                         if cand:
                             name_tag = cand.upper()
                     break
@@ -229,7 +229,7 @@ def parse_oa(file):
                 tags.append(name_tag)
             else:
                 if contains_tag_section:
-                    # 1) Grab whole-string slash-NC tags
+                    # 1) Grab whole-string slash-compounds
                     raw_comps = re.findall(
                         r'\b[A-Z0-9\-_]+(?:\s*/\s*IC\d{2,5}-NC)\b',
                         tag_block, re.IGNORECASE
@@ -241,28 +241,30 @@ def parse_oa(file):
                         tags.append(comp)
                         skip_ic.add(comp.split('/',1)[1])
 
-                    # remove NC compounds before generic regex
-                    temp = tag_block
-                    for rc in raw_comps:
-                        temp = re.sub(re.escape(rc), ' ', temp, flags=re.IGNORECASE)
+                    # remove those compounds before generic extraction
+                    temp_block = tag_block
+                    for raw in raw_comps:
+                        temp_block = re.sub(re.escape(raw), ' ', temp_block, flags=re.IGNORECASE)
 
-                    # 2) Generic tag extraction
-                    for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp):
+                    # 2) Original generic-tag extraction
+                    for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp_block):
                         if cust_po and (t == cust_po or t.startswith(cust_po)):
                             continue
-                        if (re.search(r'[A-Z]',t) and re.search(r'\d',t)
-                            and not re.fullmatch(r'[\d\-]+',t)
-                            and not re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}',t)
-                            and 5 <= len(t) <= 50):
+                        has_letters  = bool(re.search(r'[A-Z]', t))
+                        has_digits   = bool(re.search(r'\d', t))
+                        is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
+                        is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t))
+                        ok_len       = 5 <= len(t) <= 50
+                        if has_letters and has_digits and not is_all_digits and not is_date and ok_len:
                             tags.append(t)
 
-                # 3) Universal IC detection
+                # Universal IC/NC detection
                 for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b', block, re.IGNORECASE)):
                     icn = ic.upper()
                     if icn not in skip_ic:
                         tags.append(icn)
 
-            # ── NEW: repair split slash-compounds across lines ──
+            # Repair split slash-compounds across lines
             for idx, ln_text in enumerate(lines_clean):
                 m_split = re.match(r'^([A-Z0-9\-_]+)\s*/\s*(IC\d{2,5})-$', ln_text, re.IGNORECASE)
                 if m_split and idx+1 < len(lines_clean) and lines_clean[idx+1].strip().upper() == 'NC':
@@ -270,7 +272,7 @@ def parse_oa(file):
                     if comp not in tags:
                         tags.append(comp)
 
-            # ── EXTRA: catch any slash-compound even without “-NC” ──
+            # Catch any slash-compound without "-NC"
             for ln_text in lines_clean:
                 if '/' in ln_text and 'NC' not in ln_text.upper():
                     parts = re.split(r'\s*/\s*', ln_text)
@@ -281,34 +283,36 @@ def parse_oa(file):
                             if comp not in tags:
                                 tags.append(comp)
 
-            # compute wire-on tags as those containing a slash
+            # Compute wire-on tags
             wire_on_tags = [t for t in tags if '/' in t]
 
-            # Dedupe & replicate by quantity (only generic tags replicate)
+            # ── TINY CHANGE: drop any trailing-hyphen splinters & prefer true compounds ──
+            tags = [t for t in tags if not t.endswith('-')]
+            slash_compounds = [t for t in tags if '/' in t]
+            if slash_compounds:
+                tags = slash_compounds
+
+            # Dedupe & replicate by quantity
             tags = list(dict.fromkeys(tags))
             if qty.isdigit() and int(qty) > 1:
                 tags = [t for t in tags for _ in range(int(qty))]
 
-            # ensure wire-on tags remain unique
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
-
             has_tag = 'Y' if tags else 'N'
 
-            # Calibration/config logic (unchanged) …
+            # Calibration/configuration logic
             calib_parts  = []
             wire_configs = []
             for idx3, ln3 in enumerate(lines_clean):
                 if re.search(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3):
-                    ranges = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3)
-                    unit_clean = ""
-                    if idx3 + 1 < len(lines_clean):
-                        um = re.search(
-                            r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
-                            lines_clean[idx3+1].upper()
-                        )
+                    ranges    = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3)
+                    unit_clean= ""
+                    if idx3+1 < len(lines_clean):
+                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
+                                       lines_clean[idx3+1].upper())
                         if um:
                             unit_clean = um.group(0).strip().upper()
-                    if idx3 + 2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx3+2].strip()):
+                    if idx3+2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx3+2].strip()):
                         code = lines_clean[idx3+2].strip()[1]
                         wire_configs.append(f"{code}-wire RTD")
                     for r in ranges:
@@ -356,7 +360,7 @@ def parse_oa(file):
             'Calib Details': ''
         }])], ignore_index=True)
 
-    # — Remove duplicate in Tags column —
+    # Remove duplicate tags in column
     df['Tags'] = df['Tags'].apply(
         lambda s: ", ".join(dict.fromkeys([t.strip() for t in s.split(',') if t.strip()]))
     )
