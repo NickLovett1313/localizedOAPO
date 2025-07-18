@@ -229,56 +229,61 @@ def parse_oa(file):
                 tags.append(name_tag)
             else:
                 if contains_tag_section:
-                    # 1) Grab whole-string slash tags (flexible spaces around the slash)
+                    # 1) Grab whole-string slash tags (flexible spaces)
                     raw_comps = re.findall(
                         r'\b[A-Z0-9\-_]+(?:\s*/\s*IC\d{2,5}-NC)\b',
                         tag_block, re.IGNORECASE
                     )
-                    # normalize to e.g. "TT-P0102/IC0063-NC"
-                    compounds = [re.sub(r'\s*/\s*','/',r.upper()) for r in raw_comps]
+                    compounds = [re.sub(r'\s*/\s*', '/', rc.upper()) for rc in raw_comps]
                     for comp in compounds:
                         if cust_po and (comp == cust_po or comp.startswith(cust_po)):
                             continue
                         tags.append(comp)
                         skip_ic.add(comp.split('/',1)[1])
 
-                    # 2) Strip those compounds out before the generic-tag regex
+                    # remove those before generic regex
                     temp = tag_block
-                    for raw in raw_comps:
-                        temp = re.sub(re.escape(raw), ' ', temp, flags=re.IGNORECASE)
+                    for rc in raw_comps:
+                        temp = re.sub(re.escape(rc), ' ', temp, flags=re.IGNORECASE)
 
-                    # 3) The regular generic tags
+                    # 2) Generic tag extraction
                     for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp):
                         if cust_po and (t == cust_po or t.startswith(cust_po)):
                             continue
-                        if (bool(re.search(r'[A-Z]',t))
-                            and bool(re.search(r'\d',t))
+                        if (re.search(r'[A-Z]',t) and re.search(r'\d',t)
                             and not re.fullmatch(r'[\d\-]+',t)
                             and not re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}',t)
                             and 5 <= len(t) <= 50):
                             tags.append(t)
 
-                # 4) Universal IC detection (no slash compounds)
+                # 3) Universal IC detection
                 for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b', block, re.IGNORECASE)):
                     icn = ic.upper()
                     if icn not in skip_ic:
                         tags.append(icn)
 
-            # ── NOW: compute wire-on tags simply as the compound tags ──
-            #     (i.e. anything in `tags` containing a slash)
+            # ── NEW: repair split slash-compounds across lines ──
+            for idx, ln_text in enumerate(lines_clean):
+                m_split = re.match(r'^([A-Z0-9\-_]+)\s*/\s*(IC\d{2,5})-$', ln_text, re.IGNORECASE)
+                if m_split and idx+1 < len(lines_clean) and lines_clean[idx+1].strip().upper() == 'NC':
+                    comp = f"{m_split.group(1).upper()}/{m_split.group(2).upper()}-NC"
+                    if comp not in tags:
+                        tags.append(comp)
+
+            # compute wire-on tags as those containing a slash
             wire_on_tags = [t for t in tags if '/' in t]
 
-            # Dedupe & replicate by quantity
+            # Dedupe & replicate by quantity (only for generic tags)
             tags = list(dict.fromkeys(tags))
             if qty.isdigit() and int(qty) > 1:
                 tags = [t for t in tags for _ in range(int(qty))]
 
-            # wire-on tags stay unique (no replication)
+            # ensure wire-on tags remain unique
             wire_on_tags = list(dict.fromkeys(wire_on_tags))
 
             has_tag = 'Y' if tags else 'N'
 
-            # Calibration/config logic (unchanged) …
+            # Calibration/configuration logic (unchanged) …
             calib_parts  = []
             wire_configs = []
             for idx3, ln3 in enumerate(lines_clean):
@@ -321,7 +326,7 @@ def parse_oa(file):
     # 9) Append surcharge rows
     data.extend(tariff_rows)
 
-    # 10) DataFrame & ORDER TOTAL
+    # 10) Build DataFrame & append ORDER TOTAL
     df = pd.DataFrame(data)
     if order_total:
         df = pd.concat([df, pd.DataFrame([{
