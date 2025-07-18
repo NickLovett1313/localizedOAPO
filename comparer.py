@@ -4,9 +4,15 @@ from difflib import ndiff
 
 def normalize_line_number(ln):
     try:
-        return str(int(ln))  # removes leading zeros
+        return str(int(str(ln).strip()))
     except:
-        return ln
+        return str(ln).strip()
+
+def safe_sort_key(x):
+    try:
+        return int(x)
+    except:
+        return float('inf')
 
 def combine_duplicate_lines(df):
     df['Line No'] = df['Line No'].astype(str).apply(normalize_line_number)
@@ -30,18 +36,15 @@ def compare_dates(oa_df, po_df):
     oa_ship = oa_df[['Line No', 'Ship Date']].copy()
     po_ship = po_df[['Line No', 'Ship Date']].copy()
 
-    # Normalize
     oa_ship['Line No'] = oa_ship['Line No'].apply(normalize_line_number)
     po_ship['Line No'] = po_ship['Line No'].apply(normalize_line_number)
 
-    # Merge by line number
     merged = pd.merge(oa_ship, po_ship, on='Line No', suffixes=('_OA', '_PO'))
     merged = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']]
 
     if merged.empty:
         return pd.DataFrame()
 
-    # Group by shared OA and PO date combos
     groups = merged.groupby(['Ship Date_OA', 'Ship Date_PO'])
 
     for (oa_date, po_date), group in groups:
@@ -67,7 +70,9 @@ def highlight_diff(a, b):
 def normalize_unit(unit):
     unit = unit.upper().replace('°', '').replace('DEG', '').strip()
     mapping = {'C': 'C', 'F': 'F', 'K': 'K', 'KPA': 'KPA', 'KPAG': 'KPA', 'PSI': 'PSI'}
-    return mapping.get(unit, unit)
+    for key in mapping:
+        unit = unit.replace(key, mapping[key])
+    return unit
 
 def calib_match(a, b):
     def parse_ranges(s):
@@ -89,14 +94,13 @@ def compare_oa_po(po_df, oa_df):
     # 1. Compare Dates
     date_df = compare_dates(oa_df, po_df)
 
-    # 2. Check each line number present in either
-    all_lines = sorted(set(po_map.keys()) | set(oa_map.keys()), key=lambda x: int(x) if x.isdigit() else x)
+    # 2. Check each line number
+    all_lines = sorted(set(po_map.keys()) | set(oa_map.keys()), key=safe_sort_key)
 
     for ln in all_lines:
         po_row = po_map.get(ln)
         oa_row = oa_map.get(ln)
 
-        # Missing lines
         if po_row is None:
             discrepancies.append({'Discrepancy': f"Line {ln} is present in OA but missing in PO."})
             continue
@@ -130,7 +134,7 @@ def compare_oa_po(po_df, oa_df):
 
         # Tags
         if po_row['Has Tag?'] == 'N' and oa_row['Has Tag?'] == 'N':
-            pass  # Skip
+            pass
         else:
             po_tags = set(po_row['Tags'].split(', ')) if po_row['Tags'] else set()
             oa_tags = set(oa_row['Tags'].split(', ')) if oa_row['Tags'] else set()
