@@ -51,10 +51,7 @@ def compare_dates(oa_df, po_df):
         lines = sorted(int(x) for x in group['Line No'] if x.isdigit())
         if not lines:
             continue
-        if len(lines) == 1:
-            line_range = f"Line {lines[0]}"
-        else:
-            line_range = f"Lines {lines[0]}–{lines[-1]}"
+        line_range = f"Line {lines[0]}" if len(lines) == 1 else f"Lines {lines[0]}–{lines[-1]}"
         date_issues.append({
             'OA Line Range': line_range,
             'OA Expected Dates': oa_date,
@@ -158,16 +155,16 @@ def compare_oa_po(po_df, oa_df):
                     'Discrepancy': f"Line {ln}: Calibration mismatch → OA: {oa_row['Calib Details']} vs PO: {po_row['Calib Details']}"
                 })
 
-    # Final total check
+    # Final order total check (safe!)
     oa_total = oa_df[oa_df['Model Number'] == 'ORDER TOTAL']['Total Price'].values
     po_total = po_df[po_df['Model Number'] == 'ORDER TOTAL']['Total Price'].values
 
-    if oa_total and po_total and oa_total[0] != po_total[0]:
+    if oa_total.size > 0 and po_total.size > 0 and oa_total[0] != po_total[0]:
         try:
             oa_val = float(oa_total[0].replace(',', ''))
             po_val = float(po_total[0].replace(',', ''))
 
-            # Look for tariff in OA
+            # Check if tariff explains it
             tariff_rows = oa_df[oa_df['Model Number'].str.contains('TARIFF', case=False, na=False)]
             tariff_total = tariff_rows['Total Price'].apply(lambda x: float(x.replace(',', ''))).sum()
 
