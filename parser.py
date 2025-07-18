@@ -86,6 +86,26 @@ def parse_po(file):
         tags = list(dict.fromkeys(tags))
         has_tag = 'Y' if tags else 'N'
 
+        # ── Calibration detection (PO version) ──
+        calib_parts = []
+        lines = block.split('\n')
+        for idx, line in enumerate(lines):
+            if re.search(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', line):
+                ranges = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', line)
+                unit = ""
+                if idx+1 < len(lines):
+                    um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)', lines[idx+1].upper())
+                    if um:
+                        unit = um.group(0).strip().upper()
+                for r in ranges:
+                    calib_parts.append(f"{r} {unit}".strip())
+
+        # ✅ Deduplicate calibration entries
+        calib_parts = [part.strip() for part in calib_parts if part.strip()]
+        calib_parts = list(dict.fromkeys(calib_parts))
+        calib_data  = 'Y' if calib_parts else 'N'
+        calib_detail = ", ".join(calib_parts)
+
         data.append({
             'Line No':       ln,
             'Model Number':  model_str,
@@ -96,8 +116,8 @@ def parse_po(file):
             'Has Tag?':      has_tag,
             'Tags':          ", ".join(tags),
             'Wire-on Tag':   "",  # still blank
-            'Calib Data?':   '',
-            'Calib Details': ''
+            'Calib Data?':   calib_data,
+            'Calib Details': calib_detail
         })
 
     # 🔒 Hard Cleanup Step
