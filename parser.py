@@ -80,39 +80,39 @@ def parse_po(file):
             if has_letter and has_digit and not is_date and not is_all_digits:
                 tags.append(norm)
 
-        # ── DEDUPE & FINALIZE ──
         tags = list(dict.fromkeys(tags))
         has_tag = 'Y' if tags else 'N'
 
-        # ── Calibration detection with inline unit scan ──
+        # ── Calibration detection from "Additional Information" only ──
         calib_parts = []
         wire_configs = []
         lines = [line.strip() for line in block.split('\n') if line.strip()]
 
+        # Only scan lines under "Additional Information"
+        additional_start = None
         for idx, line in enumerate(lines):
-            # Find all range patterns
-            range_matches = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', line)
-            if range_matches:
-                # Scan same line for units
-                unit_match = re.search(
-                    r'(DEG\s*[CFK]?|°C|°F|KPA|KPAG|PSI|BAR|MBAR|KMH|MPH|FLOW|LPM|SLPM|°F|°C)',
-                    line.upper()
-                )
-                unit = unit_match.group(0).strip().upper() if unit_match else ""
-                for r in range_matches:
-                    calib_parts.append(f"{r} {unit}".strip())
+            if "Additional Information" in line:
+                additional_start = idx
+                break
 
-            # Wire type detection
-            if re.search(r'\b1[2-5]\b', line):
-                matches = re.findall(r'\b1([2-5])\b', line)
-                for w in matches:
-                    wire_configs.append(f"{w}-wire RTD")
-            if re.search(r'\b([2-5])-?WIRE\b', line.upper()):
-                wire_match = re.findall(r'\b([2-5])-?WIRE\b', line.upper())
+        if additional_start is not None:
+            for line in lines[additional_start + 1:]:
+                if "Sold To" in line:
+                    break
+
+                # Capture any "X to Y" with whatever unit is in the line
+                range_matches = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', line)
+                if range_matches:
+                    for r in range_matches:
+                        # Capture the full line if range is present
+                        calib_parts.append(f"{r} {line}".strip())
+
+                # Capture only 3-, 4-, or 5-wire RTD (never 2-wire)
+                wire_match = re.findall(r'\b([3-5])[-\s]?wire\b', line, re.IGNORECASE)
                 for w in wire_match:
                     wire_configs.append(f"{w}-wire RTD")
 
-        # Combine and dedupe
+        # Merge & dedupe
         wire_configs = list(dict.fromkeys(wire_configs))
         if wire_configs:
             calib_parts = wire_configs + calib_parts
@@ -167,9 +167,6 @@ def parse_po(file):
 
     return df
 
-import pdfplumber
-import pandas as pd
-import re
 
 def parse_oa(file):
     data = []
