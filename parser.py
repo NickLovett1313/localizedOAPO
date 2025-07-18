@@ -229,19 +229,19 @@ def parse_oa(file):
                 tags.append(name_tag)
             else:
                 if contains_tag_section:
-                    # 1) Grab whole-string slash tags (flexible spaces)
+                    # 1) Grab whole-string slash-NC tags
                     raw_comps = re.findall(
                         r'\b[A-Z0-9\-_]+(?:\s*/\s*IC\d{2,5}-NC)\b',
                         tag_block, re.IGNORECASE
                     )
-                    compounds = [re.sub(r'\s*/\s*', '/', rc.upper()) for rc in raw_comps]
+                    compounds = [re.sub(r'\s*/\s*','/', rc.upper()) for rc in raw_comps]
                     for comp in compounds:
                         if cust_po and (comp == cust_po or comp.startswith(cust_po)):
                             continue
                         tags.append(comp)
                         skip_ic.add(comp.split('/',1)[1])
 
-                    # remove those before generic regex
+                    # remove NC compounds before generic regex
                     temp = tag_block
                     for rc in raw_comps:
                         temp = re.sub(re.escape(rc), ' ', temp, flags=re.IGNORECASE)
@@ -270,10 +270,21 @@ def parse_oa(file):
                     if comp not in tags:
                         tags.append(comp)
 
+            # ── EXTRA: catch any slash-compound even without “-NC” ──
+            for ln_text in lines_clean:
+                if '/' in ln_text and 'NC' not in ln_text.upper():
+                    parts = re.split(r'\s*/\s*', ln_text)
+                    if len(parts) == 2:
+                        left, right = parts[0].strip().upper(), parts[1].strip().upper()
+                        if re.fullmatch(r'[A-Z0-9\-_]+', left) and re.fullmatch(r'[A-Z0-9\-]+', right):
+                            comp = f"{left}/{right}"
+                            if comp not in tags:
+                                tags.append(comp)
+
             # compute wire-on tags as those containing a slash
             wire_on_tags = [t for t in tags if '/' in t]
 
-            # Dedupe & replicate by quantity (only for generic tags)
+            # Dedupe & replicate by quantity (only generic tags replicate)
             tags = list(dict.fromkeys(tags))
             if qty.isdigit() and int(qty) > 1:
                 tags = [t for t in tags for _ in range(int(qty))]
@@ -283,7 +294,7 @@ def parse_oa(file):
 
             has_tag = 'Y' if tags else 'N'
 
-            # Calibration/configuration logic (unchanged) …
+            # Calibration/config logic (unchanged) …
             calib_parts  = []
             wire_configs = []
             for idx3, ln3 in enumerate(lines_clean):
@@ -291,8 +302,10 @@ def parse_oa(file):
                     ranges = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3)
                     unit_clean = ""
                     if idx3 + 1 < len(lines_clean):
-                        um = re.search(r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
-                                       lines_clean[idx3+1].upper())
+                        um = re.search(
+                            r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
+                            lines_clean[idx3+1].upper()
+                        )
                         if um:
                             unit_clean = um.group(0).strip().upper()
                     if idx3 + 2 < len(lines_clean) and re.fullmatch(r'1[2-5]', lines_clean[idx3+2].strip()):
@@ -358,6 +371,5 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
-
 
 
