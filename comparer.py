@@ -104,10 +104,14 @@ def group_date_discrepancies(date_discrepancies):
             line_num = int(''.join(filter(str.isdigit, line_str)))
         except ValueError:
             continue
-        entries.append((line_num, oa_date.strip(), po_date.strip()))
+        if oa_date != po_date:
+            entries.append((line_num, oa_date.strip(), po_date.strip()))
 
     entries.sort(key=lambda x: x[0])
     grouped = []
+    if not entries:
+        return pd.DataFrame()
+
     current_group = [entries[0][0]]
     current_oa, current_po = entries[0][1], entries[0][2]
 
