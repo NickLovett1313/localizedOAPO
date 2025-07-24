@@ -38,9 +38,8 @@ def combine_duplicate_lines(df):
     }).reset_index()
 
 def compare_dates(oa_df, po_df):
-    oa = oa_df[['Line No', 'Ship Date']].copy()
-    po = po_df[['Line No', 'Ship Date']].copy()
-
+    oa = oa_df[['Line No','Ship Date']].copy()
+    po = po_df[['Line No','Ship Date']].copy()
     oa['Line No'] = oa['Line No'].apply(normalize_line_number)
     po['Line No'] = po['Line No'].apply(normalize_line_number)
 
@@ -50,26 +49,24 @@ def compare_dates(oa_df, po_df):
         return pd.DataFrame()
 
     issues = []
-    for (oa_date, po_date), grp in diff.groupby(['Ship Date_OA', 'Ship Date_PO']):
+    for (d_oa, d_po), grp in diff.groupby(['Ship Date_OA','Ship Date_PO']):
         nums = sorted(int(n) for n in grp['Line No'] if n.isdigit())
         if not nums:
             continue
-        oa_range = f"Line {nums[0]}" if len(nums) == 1 else f"Lines {nums[0]}–{nums[-1]}"
-        po_range = f"Line {nums[0]}" if len(nums) == 1 else f"Lines {nums[0]}–{nums[-1]}"
+        oa_range = f"Line {nums[0]}" if len(nums)==1 else f"Lines {nums[0]}–{nums[-1]}"
+        po_range = f"Line {nums[0]}" if len(nums)==1 else f"Lines {nums[0]}–{nums[-1]}"
         issues.append({
-            'OA Line Range': oa_range,
-            'OA Expected Dates': oa_date,
-            'PO Line Range': po_range,
-            'PO Requested Dates': po_date,
-            'SortKey': nums[0]
+            'OA Line Range':      oa_range,
+            'OA Expected Dates':  d_oa,
+            'PO Line Range':      po_range,
+            'PO Requested Dates': d_po,
+            'SortKey':            nums[0]
         })
 
     df = pd.DataFrame(issues)
+    # **Sort purely by the numeric start of the OA Range**:
     df = df.sort_values(by='SortKey').drop(columns='SortKey').reset_index(drop=True)
     return df
-
-
-
 
 def highlight_diff(a, b):
     return ''.join(
@@ -125,7 +122,7 @@ def compare_oa_po(po_df, oa_df):
     # 3) Dates
     date_df = compare_dates(oa_df, po_df)
 
-    # 4) Line-by-line
+    # 4) Line-by-line checks
     po_map = {row['Line No']: row for _, row in po_df.iterrows()}
     oa_map = {row['Line No']: row for _, row in oa_df.iterrows()}
     all_lines = sorted(set(po_map) | set(oa_map), key=safe_sort_key)
