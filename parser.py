@@ -75,6 +75,9 @@ def parse_po(file):
             if has_letter and has_digit and not is_date and not is_all_digits:
                 tags.append(norm)
 
+        # —— NEW: filter out any "N/A" tags —— 
+        tags = [t for t in tags if t.upper() != "N/A"]
+
         tags    = list(dict.fromkeys(tags))
         has_tag = 'Y' if tags else 'N'
 
@@ -188,8 +191,6 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
-
-
 
 
 def parse_oa(file):
