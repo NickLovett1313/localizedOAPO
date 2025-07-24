@@ -62,8 +62,10 @@ def compare_dates(oa_df, po_df):
         match = re.search(r'\d+', rng)
         return int(match.group()) if match else float('inf')
 
-    issues.sort(key=lambda x: extract_start_ln(x['OA Line Range']))
-    return pd.DataFrame(issues)
+    df = pd.DataFrame(issues)
+    df['SortKey'] = df['OA Line Range'].apply(extract_start_ln)
+    df = df.sort_values(by='SortKey').drop(columns='SortKey')
+    return df
 
 def highlight_diff(a, b):
     return ''.join(
@@ -189,32 +191,4 @@ def compare_oa_po(po_df, oa_df):
                     discrepancies.append({
                         'Discrepancy': (
                             f"Line {ln}: Calibration mismatch → "
-                            f"OA: {oa['Calib Details']} vs PO: {po['Calib Details']}"
-                        )
-                    })
-
-    oa_tot = oa_df[oa_df['Model Number']=='ORDER TOTAL']['Total Price'].values
-    po_tot = po_df[po_df['Model Number']=='ORDER TOTAL']['Total Price'].values
-    if oa_tot.size and po_tot.size and oa_tot[0]!=po_tot[0]:
-        try:
-            o = float(oa_tot[0].replace(',',''))
-            p = float(po_tot[0].replace(',',''))
-            tariff_sum = oa_tariffs['__price_float'].sum()
-            if abs((o-p) - tariff_sum) < 0.01:
-                diff_amt = abs(o-p)
-                discrepancies.append({
-                    'Discrepancy': (
-                        f"Order Total mismatch → OA: {oa_tot[0]} vs PO: {po_tot[0]}. "
-                        f"Difference ${diff_amt:.2f} is exactly due to tariff charges."
-                    )
-                })
-            else:
-                discrepancies.append({
-                    'Discrepancy': f"Order Total mismatch → OA: {oa_tot[0]} vs PO: {po_tot[0]}"
-                })
-        except:
-            discrepancies.append({
-                'Discrepancy': "Could not compare Order Totals due to formatting."
-            })
-
-    return pd.DataFrame(discrepancies), date_df
+                            f"OA: {oa['Calib Details']} vs PO:
