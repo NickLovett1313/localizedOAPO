@@ -81,7 +81,6 @@ def calib_match(a, b):
 def compare_oa_po(po_df, oa_df):
     discrepancies = []
 
-    # Normalize and group
     po_df = combine_duplicate_lines(po_df)
     oa_df = combine_duplicate_lines(oa_df)
 
@@ -103,6 +102,10 @@ def compare_oa_po(po_df, oa_df):
             discrepancies.append({'Discrepancy': f"Line {ln} is present in PO but missing in OA."})
             continue
 
+        # ───── Skip ORDER TOTAL lines ─────
+        if "ORDER TOTAL" in oa_row['Model Number'].upper() or "ORDER TOTAL" in po_row['Model Number'].upper():
+            continue
+
         # ───── TARIFF LOGIC ─────
         oa_model = oa_row['Model Number'].upper()
         po_model = po_row['Model Number'].upper()
@@ -120,7 +123,7 @@ def compare_oa_po(po_df, oa_df):
                     discrepancies.append({
                         'Discrepancy': f"Line {ln}: Tariff price mismatch → OA: {oa_row['Total Price']} vs PO: {po_row['Total Price']}"
                     })
-                continue  # Skip other checks for tariff lines
+                continue
 
         # ───── Model Number ─────
         if po_row['Model Number'] != oa_row['Model Number']:
