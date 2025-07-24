@@ -40,20 +40,25 @@ def combine_duplicate_lines(df):
 def compare_dates(oa_df, po_df):
     oa = oa_df[['Line No', 'Ship Date']].copy()
     po = po_df[['Line No', 'Ship Date']].copy()
+
     oa['Line No'] = oa['Line No'].apply(normalize_line_number)
     po['Line No'] = po['Line No'].apply(normalize_line_number)
 
-    merged = pd.merge(oa, po, on='Line No', suffixes=('_OA','_PO'))
-    merged['Match'] = merged['Ship Date_OA'] == merged['Ship Date_PO']
-    diff = merged[~merged['Match']].copy()
+    # Merge OA and PO by line
+    merged = pd.merge(oa, po, on='Line No', suffixes=('_OA', '_PO'))
+    merged = merged[merged['Ship Date_OA'].notna() & merged['Ship Date_PO'].notna()]
+    merged['Line No'] = merged['Line No'].astype(int)
 
-    if diff.empty:
+    # Only keep mismatches
+    mismatches = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']].copy()
+    if mismatches.empty:
         return "No Discrepancies Found based on the documents uploaded.", pd.DataFrame()
 
+    # Human-friendly diff
     def format_date_diff(d1, d2):
         try:
-            date1 = datetime.strptime(d1, "%d-%b-%Y")
-            date2 = datetime.strptime(d2, "%d-%b-%Y")
+            date1 = datetime.strptime(d1.strip(), "%d-%b-%Y")
+            date2 = datetime.strptime(d2.strip(), "%d-%b-%Y")
         except:
             return "Unknown"
         delta = abs((date1 - date2).days)
@@ -74,10 +79,18 @@ def compare_dates(oa_df, po_df):
             years = round(delta / 365)
             return f"{years} year{'s' if years > 1 else ''}"
 
-    diff['Difference'] = diff.apply(
+    # Add difference column
+    mismatches['Difference'] = mismatches.apply(
         lambda row: format_date_diff(row['Ship Date_OA'], row['Ship Date_PO']),
         axis=1
     )
+
+    # Clean and return
+    mismatches = mismatches[['Line No', 'Ship Date_OA', 'Ship Date_PO', 'Difference']]
+    mismatches.columns = ['Line No.', 'OA Expected Date', 'PO Requested Date', 'Difference']
+    mismatches = mismatches.sort_values(by='Line No.')
+
+    return "Discrepancies Found!", mismatches
 
     diff = diff.sort_values(by=lambda x: int(x['Line No']))
     diff = diff[['Line No', 'Ship Date_OA', 'Ship Date_PO', 'Difference']]
