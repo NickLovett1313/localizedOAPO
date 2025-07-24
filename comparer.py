@@ -54,7 +54,6 @@ def compare_dates(oa_df, po_df):
 
     merged = pd.merge(oa, po, on='Line No', suffixes=('_OA', '_PO'))
     diff = merged[merged['__parsed_OA'] != merged['__parsed_PO']]
-
     if diff.empty:
         return pd.DataFrame()
 
@@ -64,13 +63,11 @@ def compare_dates(oa_df, po_df):
         'Ship Date_PO': 'PO Requested Dates'
     })[['Line', 'OA Expected Dates', 'PO Requested Dates']]
 
-    def try_int(x):
-        try:
-            return int(x)
-        except:
-            return float('inf')
+    # ✅ Drop blank or non-numeric lines before sorting
+    df = df[df['Line'].str.strip().str.isdigit()]
 
-    return df.sort_values(by='Line', key=lambda col: col.map(try_int))
+    df = df.sort_values(by='Line', key=lambda col: col.astype(int))
+    return df
 
 def highlight_diff(a, b):
     return ''.join(
