@@ -69,18 +69,26 @@ if po_file and oa_file and po_df is not None and oa_df is not None:
             else:
                 st.markdown("*No date discrepancies found.*")
 
-            # ✅ Main Discrepancies Table
-            if not disc_df.empty:
-                st.subheader("📋 Main Discrepancies Found:")
-                st.dataframe(disc_df, use_container_width=True)
-
-                csv = disc_df.to_csv(index=False).encode('utf-8')
+            # ✅ Date Discrepancy Table
+            if not date_discrepancies.empty:
+                st.subheader("📅 Date Discrepancies Found:")
+                st.dataframe(date_discrepancies.rename(columns={
+                    'Line No': 'Line No',
+                    'Ship Date_OA': 'OA Expected Date',
+                    'Ship Date_PO': 'PO Requested Date',
+                    'Difference': 'Difference'
+                }), use_container_width=True)
+            
+                csv = date_discrepancies.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label="📥 Download Discrepancy Report CSV",
+                    label="📥 Download Date Discrepancy CSV",
                     data=csv,
-                    file_name="oa_po_discrepancy_report.csv",
+                    file_name="oa_po_date_discrepancies.csv",
                     mime="text/csv"
                 )
+            else:
+                st.markdown("*No date discrepancies found.*")
+
 
         except Exception as e:
             st.error(f"⚠️ An error occurred during comparison: {e}")
