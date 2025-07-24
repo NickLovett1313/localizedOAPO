@@ -43,7 +43,6 @@ def compare_dates(oa_df, po_df):
     oa['Line No'] = oa['Line No'].apply(normalize_line_number)
     po['Line No'] = po['Line No'].apply(normalize_line_number)
 
-    # Try parsing to date
     def try_parse(x):
         try:
             return date_parse(str(x), dayfirst=True).date()
@@ -54,16 +53,24 @@ def compare_dates(oa_df, po_df):
     po['__parsed'] = po['Ship Date'].apply(try_parse)
 
     merged = pd.merge(oa, po, on='Line No', suffixes=('_OA', '_PO'))
-
     diff = merged[merged['__parsed_OA'] != merged['__parsed_PO']]
+
     if diff.empty:
         return pd.DataFrame()
 
-    return diff.rename(columns={
+    df = diff.rename(columns={
         'Line No': 'Line',
         'Ship Date_OA': 'OA Expected Dates',
         'Ship Date_PO': 'PO Requested Dates'
-    })[['Line', 'OA Expected Dates', 'PO Requested Dates']].sort_values(by='Line', key=lambda x: x.astype(int))
+    })[['Line', 'OA Expected Dates', 'PO Requested Dates']]
+
+    def try_int(x):
+        try:
+            return int(x)
+        except:
+            return float('inf')
+
+    return df.sort_values(by='Line', key=lambda col: col.map(try_int))
 
 def highlight_diff(a, b):
     return ''.join(
