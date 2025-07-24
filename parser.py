@@ -226,7 +226,6 @@ def parse_oa(file):
                 'Total Price':   m.group(4),
                 'Has Tag?':      '',
                 'Tags':          '',
-                'Wire-on Tag':   '',
                 'Calib Data?':   '',
                 'Calib Details': ''
             })
@@ -243,7 +242,7 @@ def parse_oa(file):
         raw_line_no = blocks[i].strip()
         block       = blocks[i + 1]
 
-        # —— merge hyphen-broken across lines as before
+        # merge hyphen-broken tags across lines
         block = re.sub(r'-\s*\n\s*', '-', block)
 
         # filter valid line numbers
@@ -351,7 +350,7 @@ def parse_oa(file):
             # drop incomplete split tags
             tags = [t for t in tags if not t.endswith('-')]
 
-            # ——— NEW: remove any “subtag” t if it’s contained in a larger tag t2 ———
+            # remove subtags
             tags = [
                 t for t in tags
                 if not any(t != t2 and t in t2 for t2 in tags)
@@ -368,7 +367,6 @@ def parse_oa(file):
             if qty.isdigit() and int(qty) > 1:
                 tags = [t for t in tags for _ in range(int(qty))]
 
-            wire_on_tags = [t for t in tags if '/' in t]
             has_tag = 'Y' if tags else 'N'
 
             # === calibration logic (unchanged) ===
@@ -412,7 +410,6 @@ def parse_oa(file):
                 'Total Price':   total_price,
                 'Has Tag?':      has_tag,
                 'Tags':          ", ".join(tags),
-                'Wire-on Tag':   ", ".join(wire_on_tags),
                 'Calib Data?':   calib_data,
                 'Calib Details': calib_details
             })
@@ -432,7 +429,6 @@ def parse_oa(file):
             'Total Price':   order_total,
             'Has Tag?':      '',
             'Tags':          '',
-            'Wire-on Tag':   '',
             'Calib Data?':   '',
             'Calib Details': ''
         }])], ignore_index=True)
@@ -452,3 +448,4 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
