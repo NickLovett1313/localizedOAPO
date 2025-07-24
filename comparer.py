@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 from difflib import ndiff
+from dateutil.parser import parse as date_parse
 
 def normalize_line_number(ln):
     try:
@@ -42,8 +43,19 @@ def compare_dates(oa_df, po_df):
     oa['Line No'] = oa['Line No'].apply(normalize_line_number)
     po['Line No'] = po['Line No'].apply(normalize_line_number)
 
+    # Try parsing to date
+    def try_parse(x):
+        try:
+            return date_parse(str(x), dayfirst=True).date()
+        except:
+            return None
+
+    oa['__parsed'] = oa['Ship Date'].apply(try_parse)
+    po['__parsed'] = po['Ship Date'].apply(try_parse)
+
     merged = pd.merge(oa, po, on='Line No', suffixes=('_OA', '_PO'))
-    diff = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']]
+
+    diff = merged[merged['__parsed_OA'] != merged['__parsed_PO']]
     if diff.empty:
         return pd.DataFrame()
 
@@ -51,7 +63,7 @@ def compare_dates(oa_df, po_df):
         'Line No': 'Line',
         'Ship Date_OA': 'OA Expected Dates',
         'Ship Date_PO': 'PO Requested Dates'
-    }).sort_values(by='Line', key=lambda x: x.astype(int))
+    })[['Line', 'OA Expected Dates', 'PO Requested Dates']].sort_values(by='Line', key=lambda x: x.astype(int))
 
 def highlight_diff(a, b):
     return ''.join(
@@ -98,7 +110,6 @@ def compare_oa_po(po_df, oa_df):
     oa_df = combine_duplicate_lines(oa_df)
     po_df = combine_duplicate_lines(po_df)
 
-    # ✅ Use updated line-by-line date comparison
     date_df = compare_dates(oa_df, po_df)
 
     po_map = {row['Line No']: row for _, row in po_df.iterrows()}
