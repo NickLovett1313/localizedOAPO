@@ -15,6 +15,7 @@ def safe_sort_key(x):
         return float('inf')
 
 def parse_price(p):
+    """Convert '1,234.56' → 1234.56 (float), or return None on failure."""
     try:
         return float(str(p).replace(',','').strip())
     except:
@@ -49,7 +50,8 @@ def compare_dates(oa_df, po_df):
     issues = []
     for (d_oa, d_po), grp in diff.groupby(['Ship Date_OA','Ship Date_PO']):
         nums = sorted(int(n) for n in grp['Line No'] if n.isdigit())
-        if not nums: continue
+        if not nums:
+            continue
         rng = f"Line {nums[0]}" if len(nums)==1 else f"Lines {nums[0]}–{nums[-1]}"
         issues.append({
             'OA Line Range':       rng,
@@ -58,12 +60,9 @@ def compare_dates(oa_df, po_df):
             'PO Requested Dates':  d_po
         })
 
-    def extract_start_ln(rng):
-        match = re.search(r'\d+', rng)
-        return int(match.group()) if match else float('inf')
-
+    # build DataFrame and sort by the starting line number
     df = pd.DataFrame(issues)
-    df['SortKey'] = df['OA Line Range'].apply(extract_start_ln)
+    df['SortKey'] = df['OA Line Range'].apply(lambda rng: int(re.search(r'\d+', rng).group()))
     df = df.sort_values(by='SortKey').drop(columns='SortKey')
     return df
 
@@ -90,9 +89,9 @@ def calib_match(a, b):
 def compare_oa_po(po_df, oa_df):
     discrepancies = []
 
+    # 1) Tariff rows
     oa_df['__price_float'] = oa_df['Total Price'].apply(parse_price)
     po_df['__price_float'] = po_df['Total Price'].apply(parse_price)
-
     oa_tariffs = oa_df[oa_df['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     po_tariffs = po_df[po_df['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
 
@@ -103,7 +102,6 @@ def compare_oa_po(po_df, oa_df):
                     f"OA includes a tariff charge ${oa_tar['Total Price']} but PO does not."
                 )
             })
-
     for _, po_tar in po_tariffs.iterrows():
         if not ((oa_tariffs['__price_float'] == po_tar['__price_float']).any()):
             discrepancies.append({
@@ -112,20 +110,21 @@ def compare_oa_po(po_df, oa_df):
                 )
             })
 
-    oa_df = oa_df.loc[~oa_df['Model Number'].str.contains('TARIFF', case=False, na=False)]
-    po_df = po_df.loc[~po_df['Model Number'].str.contains('TARIFF', case=False, na=False)]
-    oa_df = oa_df.drop(columns='__price_float')
-    po_df = po_df.drop(columns='__price_float')
+    oa_df = oa_df.loc[~oa_df['Model Number'].str.contains('TARIFF', case=False, na=False)].drop(columns='__price_float')
+    po_df = po_df.loc[~po_df['Model Number'].str.contains('TARIFF', case=False, na=False)].drop(columns='__price_float')
 
+    # 2) Combine duplicates
     oa_df = combine_duplicate_lines(oa_df)
     po_df = combine_duplicate_lines(po_df)
 
-    po_map = {row['Line No']: row for _, row in po_df.iterrows()}
-    oa_map = {row['Line No']: row for _, row in oa_df.iterrows()}
-
+    # 3) Dates
     date_df = compare_dates(oa_df, po_df)
 
-    all_lines = sorted(set(po_map)|set(oa_map), key=safe_sort_key)
+    # 4) Line-by-line
+    po_map = {row['Line No']: row for _, row in po_df.iterrows()}
+    oa_map = {row['Line No']: row for _, row in oa_df.iterrows()}
+    all_lines = sorted(set(po_map) | set(oa_map), key=safe_sort_key)
+
     for ln in all_lines:
         po = po_map.get(ln)
         oa = oa_map.get(ln)
@@ -135,7 +134,6 @@ def compare_oa_po(po_df, oa_df):
         if oa is None:
             discrepancies.append({'Discrepancy': f"Line {ln}: present in PO but missing in OA."})
             continue
-
         if oa['Model Number'].upper()=='ORDER TOTAL' and po['Model Number'].upper()=='ORDER TOTAL':
             continue
 
@@ -146,7 +144,6 @@ def compare_oa_po(po_df, oa_df):
                     f"Line {ln}: Model Number mismatch → OA: '{oa['Model Number']}' vs PO: '{po['Model Number']}' | Diff: {diff}"
                 )
             })
-
         if po['Unit Price'] != oa['Unit Price']:
             discrepancies.append({
                 'Discrepancy': f"Line {ln}: Unit Price mismatch → OA: {oa['Unit Price']} vs PO: {po['Unit Price']}"
@@ -155,8 +152,7 @@ def compare_oa_po(po_df, oa_df):
             discrepancies.append({
                 'Discrepancy': f"Line {ln}: Total Price mismatch → OA: {oa['Total Price']} vs PO: {po['Total Price']}"
             })
-
-        if oa['Tags'] and oa['Wire-on Tag'] and oa['Tags']!=oa['Wire-on Tag']:
+        if oa['Tags'] and oa['Wire-on Tag'] and oa['Tags'] != oa['Wire-on Tag']:
             discrepancies.append({
                 'Discrepancy': (
                     f"Line {ln}: OA Wire-on Tag mismatch → Tags: {oa['Tags']} vs Wire-on Tag: {oa['Wire-on Tag']}"
@@ -171,13 +167,13 @@ def compare_oa_po(po_df, oa_df):
             discrepancies.append({'Discrepancy': f"Line {ln}: OA has tag(s) but PO does not"})
         elif po_has and not oa_has:
             discrepancies.append({'Discrepancy': f"Line {ln}: PO has tag(s) but OA does not"})
-        elif oa_has and po_has and oa_tags!=po_tags:
+        elif oa_has and po_has and oa_tags != po_tags:
             discrepancies.append({
                 'Discrepancy': f"Line {ln}: Tag mismatch → OA: {sorted(oa_tags)} vs PO: {sorted(po_tags)}"
             })
 
         if not (oa['Calib Data?']=='N' and po['Calib Data?']=='N'):
-            if oa['Calib Data?']!=po['Calib Data?']:
+            if oa['Calib Data?'] != po['Calib Data?']:
                 discrepancies.append({
                     'Discrepancy': (
                         f"Line {ln}: Calibration data missing on one side → "
@@ -187,8 +183,37 @@ def compare_oa_po(po_df, oa_df):
             else:
                 a = normalize_unit(oa['Calib Details'])
                 b = normalize_unit(po['Calib Details'])
-                if not calib_match(a,b):
+                if not calib_match(a, b):
                     discrepancies.append({
                         'Discrepancy': (
                             f"Line {ln}: Calibration mismatch → "
-                            f"OA: {oa['Calib Details']} vs PO:
+                            f"OA: {oa['Calib Details']} vs PO: {po['Calib Details']}"
+                        )
+                    })
+
+    # 5) Order Total
+    oa_tot = oa_df[oa_df['Model Number']=='ORDER TOTAL']['Total Price'].values
+    po_tot = po_df[po_df['Model Number']=='ORDER TOTAL']['Total Price'].values
+    if oa_tot.size and po_tot.size and oa_tot[0] != po_tot[0]:
+        try:
+            o = float(oa_tot[0].replace(',',''))
+            p = float(po_tot[0].replace(',',''))
+            tariff_sum = oa_tariffs['__price_float'].sum()
+            if abs((o - p) - tariff_sum) < 0.01:
+                diff_amt = abs(o - p)
+                discrepancies.append({
+                    'Discrepancy': (
+                        f"Order Total mismatch → OA: {oa_tot[0]} vs PO: {po_tot[0]}. "
+                        f"Difference ${diff_amt:.2f} is exactly due to tariff charges."
+                    )
+                })
+            else:
+                discrepancies.append({
+                    'Discrepancy': f"Order Total mismatch → OA: {oa_tot[0]} vs PO: {po_tot[0]}"
+                })
+        except:
+            discrepancies.append({
+                'Discrepancy': "Could not compare Order Totals due to formatting."
+            })
+
+    return pd.DataFrame(discrepancies), date_df
