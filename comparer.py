@@ -57,15 +57,35 @@ def compare_dates(oa_df, po_df):
     if diff.empty:
         return pd.DataFrame()
 
+    def describe_diff(d1, d2):
+        if d1 is None or d2 is None:
+            return "Unknown"
+        days = abs((d2 - d1).days)
+        if days < 7:
+            return "<1 week"
+        elif days < 14:
+            return "1–2 weeks"
+        elif days < 30:
+            return f"{days // 7} weeks"
+        elif days < 60:
+            return "1–2 months"
+        elif days < 365:
+            return f"{days // 30} months"
+        else:
+            return f"{round(days / 365, 1)} years"
+
+    diff['Date Difference'] = diff.apply(
+        lambda row: describe_diff(row['__parsed_OA'], row['__parsed_PO']),
+        axis=1
+    )
+
     df = diff.rename(columns={
         'Line No': 'Line',
         'Ship Date_OA': 'OA Expected Dates',
         'Ship Date_PO': 'PO Requested Dates'
-    })[['Line', 'OA Expected Dates', 'PO Requested Dates']]
+    })[['Line', 'OA Expected Dates', 'PO Requested Dates', 'Date Difference']]
 
-    # ✅ Drop blank or non-numeric lines before sorting
     df = df[df['Line'].str.strip().str.isdigit()]
-
     df = df.sort_values(by='Line', key=lambda col: col.astype(int))
     return df
 
