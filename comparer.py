@@ -15,7 +15,6 @@ def safe_sort_key(x):
         return float('inf')
 
 def parse_price(p):
-    """Convert '1,234.56' → 1234.56 (float), or return None on failure."""
     try:
         return float(str(p).replace(',','').strip())
     except:
@@ -46,6 +45,7 @@ def compare_dates(oa_df, po_df):
     diff = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']]
     if diff.empty:
         return pd.DataFrame()
+
     issues = []
     for (d_oa, d_po), grp in diff.groupby(['Ship Date_OA','Ship Date_PO']):
         nums = sorted(int(n) for n in grp['Line No'] if n.isdigit())
@@ -57,6 +57,12 @@ def compare_dates(oa_df, po_df):
             'PO Line Range':       rng,
             'PO Requested Dates':  d_po
         })
+
+    def extract_start_ln(rng):
+        match = re.search(r'\d+', rng)
+        return int(match.group()) if match else float('inf')
+
+    issues.sort(key=lambda x: extract_start_ln(x['OA Line Range']))
     return pd.DataFrame(issues)
 
 def highlight_diff(a, b):
@@ -67,11 +73,8 @@ def highlight_diff(a, b):
     )
 
 def normalize_unit(u):
-    # 1) Uppercase and remove degree words/symbols
     u = u.upper().replace('°','').replace('DEG','').strip()
-    # 2) Collapse all runs of whitespace to a single space
     u = ' '.join(u.split())
-    # 3) Normalize unit abbreviations
     m = {'C':'C','F':'F','K':'K','KPA':'KPA','KPAG':'KPA','PSI':'PSI'}
     for k,v in m.items():
         u = u.replace(k, v)
@@ -85,14 +88,12 @@ def calib_match(a, b):
 def compare_oa_po(po_df, oa_df):
     discrepancies = []
 
-    # — 1) Extract & compare tariff rows without any "Line" prefix —
     oa_df['__price_float'] = oa_df['Total Price'].apply(parse_price)
     po_df['__price_float'] = po_df['Total Price'].apply(parse_price)
 
     oa_tariffs = oa_df[oa_df['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
     po_tariffs = po_df[po_df['Model Number'].str.contains('TARIFF', case=False, na=False)].copy()
 
-    # OA → PO
     for _, oa_tar in oa_tariffs.iterrows():
         if not ((po_tariffs['__price_float'] == oa_tar['__price_float']).any()):
             discrepancies.append({
@@ -101,7 +102,6 @@ def compare_oa_po(po_df, oa_df):
                 )
             })
 
-    # PO → OA
     for _, po_tar in po_tariffs.iterrows():
         if not ((oa_tariffs['__price_float'] == po_tar['__price_float']).any()):
             discrepancies.append({
@@ -110,23 +110,19 @@ def compare_oa_po(po_df, oa_df):
                 )
             })
 
-    # strip tariff rows out before main loop
     oa_df = oa_df.loc[~oa_df['Model Number'].str.contains('TARIFF', case=False, na=False)]
     po_df = po_df.loc[~po_df['Model Number'].str.contains('TARIFF', case=False, na=False)]
     oa_df = oa_df.drop(columns='__price_float')
     po_df = po_df.drop(columns='__price_float')
 
-    # — 2) Normalize & combine duplicates —
     oa_df = combine_duplicate_lines(oa_df)
     po_df = combine_duplicate_lines(po_df)
 
     po_map = {row['Line No']: row for _, row in po_df.iterrows()}
     oa_map = {row['Line No']: row for _, row in oa_df.iterrows()}
 
-    # — 3) Date discrepancies —
     date_df = compare_dates(oa_df, po_df)
 
-    # — 4) Line-by-line comparison (unchanged) —
     all_lines = sorted(set(po_map)|set(oa_map), key=safe_sort_key)
     for ln in all_lines:
         po = po_map.get(ln)
@@ -197,7 +193,6 @@ def compare_oa_po(po_df, oa_df):
                         )
                     })
 
-    # — 5) Final Order Total check with detailed message —
     oa_tot = oa_df[oa_df['Model Number']=='ORDER TOTAL']['Total Price'].values
     po_tot = po_df[po_df['Model Number']=='ORDER TOTAL']['Total Price'].values
     if oa_tot.size and po_tot.size and oa_tot[0]!=po_tot[0]:
