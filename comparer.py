@@ -67,10 +67,14 @@ def highlight_diff(a, b):
     )
 
 def normalize_unit(u):
+    # 1) Uppercase and remove degree words/symbols
     u = u.upper().replace('°','').replace('DEG','').strip()
+    # 2) Collapse all runs of whitespace to a single space
+    u = ' '.join(u.split())
+    # 3) Normalize unit abbreviations
     m = {'C':'C','F':'F','K':'K','KPA':'KPA','KPAG':'KPA','PSI':'PSI'}
     for k,v in m.items():
-        u = u.replace(k,v)
+        u = u.replace(k, v)
     return u
 
 def calib_match(a, b):
