@@ -129,16 +129,24 @@ def compare_oa_po(po_df, oa_df):
                 'Discrepancy': f"Line {ln}: OA Wire-on Tag mismatch → 'Tags': {oa_row['Tags']} vs 'Wire-on Tag': {oa_row['Wire-on Tag']}"
             })
 
-        # Tags
-        if po_row['Has Tag?'] == 'N' and oa_row['Has Tag?'] == 'N':
-            pass
-        else:
-            po_tags = set(po_row['Tags'].split(', ')) if po_row['Tags'] else set()
-            oa_tags = set(oa_row['Tags'].split(', ')) if oa_row['Tags'] else set()
-            if po_tags != oa_tags:
-                discrepancies.append({
-                    'Discrepancy': f"Line {ln}: Tag mismatch → OA: {sorted(oa_tags)} vs PO: {sorted(po_tags)}"
-                })
+        # Tags – refined logic
+        oa_has_tags = oa_row['Has Tag?'] == 'Y'
+        po_has_tags = po_row['Has Tag?'] == 'Y'
+        oa_tags = set(oa_row['Tags'].split(', ')) if oa_row['Tags'] else set()
+        po_tags = set(po_row['Tags'].split(', ')) if po_row['Tags'] else set()
+
+        if oa_has_tags and not po_has_tags:
+            discrepancies.append({
+                'Discrepancy': f"Line {ln}: OA has tag(s) but PO does not"
+            })
+        elif po_has_tags and not oa_has_tags:
+            discrepancies.append({
+                'Discrepancy': f"Line {ln}: PO has tag(s) but OA does not"
+            })
+        elif oa_has_tags and po_has_tags and oa_tags != po_tags:
+            discrepancies.append({
+                'Discrepancy': f"Line {ln}: Tag mismatch → OA: {sorted(oa_tags)} vs PO: {sorted(po_tags)}"
+            })
 
         # Calibration
         if po_row['Calib Data?'] == 'N' and oa_row['Calib Data?'] == 'N':
