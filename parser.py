@@ -243,8 +243,7 @@ def parse_oa(file):
         raw_line_no = blocks[i].strip()
         block       = blocks[i + 1]
 
-        # —— NEW: merge any hyphen-broken tags across the newline ——  
-        # e.g. "FC1-NT0-\nTE-9134A" → "FC1-NT0-TE-9134A"
+        # —— merge hyphen-broken across lines as before
         block = re.sub(r'-\s*\n\s*', '-', block)
 
         # filter valid line numbers
@@ -325,7 +324,7 @@ def parse_oa(file):
                     if icn not in skip_ic:
                         tags.append(icn)
 
-            # repair any leftover split compounds (slash-case)
+            # repair split compounds
             for idx, ln_text in enumerate(lines_clean):
                 m_split = re.match(
                     r'^([A-Z0-9\-_]+)\s*/\s*(IC\d{2,5})-$',
@@ -349,8 +348,14 @@ def parse_oa(file):
                             if comp not in tags:
                                 tags.append(comp)
 
-            # drop any incomplete split tags ending in '-'
+            # drop incomplete split tags
             tags = [t for t in tags if not t.endswith('-')]
+
+            # ——— NEW: remove any “subtag” t if it’s contained in a larger tag t2 ———
+            tags = [
+                t for t in tags
+                if not any(t != t2 and t in t2 for t2 in tags)
+            ]
 
             # post-process qty=1
             if qty.isdigit() and int(qty) == 1:
@@ -447,4 +452,3 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
-
