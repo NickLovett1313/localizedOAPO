@@ -38,32 +38,39 @@ def combine_duplicate_lines(df):
     }).reset_index()
 
 def compare_dates(oa_df, po_df):
+    # 1) pull only line number & ship date
     oa = oa_df[['Line No','Ship Date']].copy()
     po = po_df[['Line No','Ship Date']].copy()
     oa['Line No'] = oa['Line No'].apply(normalize_line_number)
     po['Line No'] = po['Line No'].apply(normalize_line_number)
+
+    # 2) merge and filter mismatches
     merged = pd.merge(oa, po, on='Line No', suffixes=('_OA','_PO'))
     diff = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']]
     if diff.empty:
         return pd.DataFrame()
 
-    issues = []
-    for (d_oa, d_po), grp in diff.groupby(['Ship Date_OA','Ship Date_PO']):
-        nums = sorted(int(n) for n in grp['Line No'] if n.isdigit())
-        if not nums:
-            continue
-        rng = f"Line {nums[0]}" if len(nums)==1 else f"Lines {nums[0]}–{nums[-1]}"
-        issues.append({
-            'OA Line Range':       rng,
-            'OA Expected Dates':   d_oa,
-            'PO Line Range':       rng,
-            'PO Requested Dates':  d_po
+    # 3) ungrouped: one row per mismatched line
+    rows = []
+    for _, r in diff.iterrows():
+        ln = r['Line No']
+        label = f"Line {ln}"
+        rows.append({
+            'OA Line Range':      label,
+            'OA Expected Dates':  r['Ship Date_OA'],
+            'PO Line Range':      label,
+            'PO Requested Dates': r['Ship Date_PO'],
+            '__sort_start':       safe_sort_key(ln)
         })
 
-    # build DataFrame and sort by the starting line number
-    df = pd.DataFrame(issues)
-    df['SortKey'] = df['OA Line Range'].apply(lambda rng: int(re.search(r'\d+', rng).group()))
-    df = df.sort_values(by='SortKey').drop(columns='SortKey')
+    # 4) sort by numeric line, drop helper column
+    df = pd.DataFrame(rows)
+    df = (
+        df
+        .sort_values(by='__sort_start')
+        .drop(columns='__sort_start')
+        .reset_index(drop=True)
+    )
     return df
 
 def highlight_diff(a, b):
@@ -117,10 +124,10 @@ def compare_oa_po(po_df, oa_df):
     oa_df = combine_duplicate_lines(oa_df)
     po_df = combine_duplicate_lines(po_df)
 
-    # 3) Dates
+    # 3) Dates (ungrouped)
     date_df = compare_dates(oa_df, po_df)
 
-    # 4) Line-by-line
+    # 4) Line-by-line, calibration, tags, and order-total logic (unchanged)
     po_map = {row['Line No']: row for _, row in po_df.iterrows()}
     oa_map = {row['Line No']: row for _, row in oa_df.iterrows()}
     all_lines = sorted(set(po_map) | set(oa_map), key=safe_sort_key)
