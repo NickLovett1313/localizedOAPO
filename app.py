@@ -57,10 +57,13 @@ if po_file and oa_file and po_df is not None and oa_df is not None:
             else:
                 st.warning("I have reviewed the OA and Factory PO for this order and found the following discrepancies. Everything else (that didn't appear in the list) looked good.")
 
-            # Date Table
-            if not date_df.empty:
+            # Date Discrepancy Section
+            if date_df:  # it's now a list of strings
                 st.subheader("📅 Date Discrepancies Found:")
-                st.dataframe(date_df, use_container_width=True)
+                for i, entry in enumerate(date_df, 1):
+                    st.markdown(f"**{i}.** {entry}")
+            else:
+                st.markdown("*No date discrepancies found.*")
 
             # Main Discrepancies
             if not disc_df.empty:
