@@ -38,37 +38,36 @@ def combine_duplicate_lines(df):
     }).reset_index()
 
 def compare_dates(oa_df, po_df):
-    oa = oa_df[['Line No','Ship Date']].copy()
-    po = po_df[['Line No','Ship Date']].copy()
+    oa = oa_df[['Line No', 'Ship Date']].copy()
+    po = po_df[['Line No', 'Ship Date']].copy()
 
-    # Normalize line numbers
     oa['Line No'] = oa['Line No'].apply(normalize_line_number)
     po['Line No'] = po['Line No'].apply(normalize_line_number)
 
-    # Merge on line number
     merged = pd.merge(oa, po, on='Line No', suffixes=('_OA','_PO'))
     diff = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']]
     if diff.empty:
         return pd.DataFrame()
 
-    # Group by date mismatches and extract ranges
     issues = []
-    for (d_oa, d_po), grp in diff.groupby(['Ship Date_OA', 'Ship Date_PO']):
+    for (oa_date, po_date), grp in diff.groupby(['Ship Date_OA', 'Ship Date_PO']):
         nums = sorted(int(n) for n in grp['Line No'] if n.isdigit())
         if not nums:
             continue
-        line_range = f"Line {nums[0]}" if len(nums) == 1 else f"Lines {nums[0]}–{nums[-1]}"
+        oa_range = f"Line {nums[0]}" if len(nums) == 1 else f"Lines {nums[0]}–{nums[-1]}"
+        po_range = f"Line {nums[0]}" if len(nums) == 1 else f"Lines {nums[0]}–{nums[-1]}"
         issues.append({
-            'Lines': line_range,
-            'OA Expected Dates': d_oa,
-            'PO Requested Dates': d_po,
+            'OA Line Range': oa_range,
+            'OA Expected Dates': oa_date,
+            'PO Line Range': po_range,
+            'PO Requested Dates': po_date,
             'SortKey': nums[0]
         })
 
-    # Sort and return clean 3-column output
     df = pd.DataFrame(issues)
     df = df.sort_values(by='SortKey').drop(columns='SortKey').reset_index(drop=True)
     return df
+
 
 
 
