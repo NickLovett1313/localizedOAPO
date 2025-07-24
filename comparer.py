@@ -57,13 +57,12 @@ def compare_dates(oa_df, po_df):
             'OA Line Range':       rng,
             'OA Expected Dates':   d_oa,
             'PO Line Range':       rng,
-            'PO Requested Dates':  d_po
+            'PO Requested Dates':  d_po,
+            'SortKey':             nums[0]
         })
 
-    # build DataFrame and sort by the starting line number
     df = pd.DataFrame(issues)
-    df['SortKey'] = df['OA Line Range'].apply(lambda rng: int(re.search(r'\d+', rng).group()))
-    df = df.sort_values(by='SortKey').drop(columns='SortKey')
+    df = df.sort_values(by='SortKey').drop(columns='SortKey').reset_index(drop=True)
     return df
 
 def highlight_diff(a, b):
