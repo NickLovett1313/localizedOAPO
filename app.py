@@ -49,16 +49,19 @@ if po_file and oa_file and po_df is not None and oa_df is not None:
 
     if st.button("🔍 Ready to Compare"):
         try:
-            # ✅ CHANGED: use correct variable name from compare_oa_po()
+            # ✅ Unpack properly
             disc_df, date_discrepancies = compare_oa_po(po_df, oa_df)
 
-            # Summary
-            if disc_df.empty and not date_discrepancies:
+            # ✅ Explicitly check if both are empty
+            is_disc_empty = disc_df.empty if isinstance(disc_df, pd.DataFrame) else True
+            is_date_empty = len(date_discrepancies) == 0 if isinstance(date_discrepancies, list) else True
+
+            if is_disc_empty and is_date_empty:
                 st.success("I have reviewed the OA and Factory PO for this order and found no discrepancies. Everything else looked good.")
             else:
                 st.warning("I have reviewed the OA and Factory PO for this order and found the following discrepancies. Everything else (that didn't appear in the list) looked good.")
 
-            # ✅ UPDATED: show date discrepancies list
+            # ✅ Date Discrepancy List
             if date_discrepancies:
                 st.subheader("📅 Date Discrepancies Found:")
                 for i, entry in enumerate(date_discrepancies, 1):
@@ -66,7 +69,7 @@ if po_file and oa_file and po_df is not None and oa_df is not None:
             else:
                 st.markdown("*No date discrepancies found.*")
 
-            # Main Discrepancies
+            # ✅ Main Discrepancies Table
             if not disc_df.empty:
                 st.subheader("📋 Main Discrepancies Found:")
                 st.dataframe(disc_df, use_container_width=True)
@@ -78,5 +81,6 @@ if po_file and oa_file and po_df is not None and oa_df is not None:
                     file_name="oa_po_discrepancy_report.csv",
                     mime="text/csv"
                 )
+
         except Exception as e:
             st.error(f"⚠️ An error occurred during comparison: {e}")
