@@ -54,11 +54,10 @@ def compare_dates(oa_df, po_df):
             continue
         rng = f"Line {nums[0]}" if len(nums)==1 else f"Lines {nums[0]}–{nums[-1]}"
         issues.append({
-            'OA Line Range':       rng,
-            'OA Expected Dates':   d_oa,
-            'PO Line Range':       rng,
-            'PO Requested Dates':  d_po,
-            'SortKey':             nums[0]
+            'Lines':             rng,
+            'OA Expected Dates': d_oa,
+            'PO Requested Dates': d_po,
+            'SortKey':           nums[0]
         })
 
     df = pd.DataFrame(issues)
