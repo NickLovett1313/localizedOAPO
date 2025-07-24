@@ -38,21 +38,21 @@ def combine_duplicate_lines(df):
     }).reset_index()
 
 def compare_dates(oa_df, po_df):
-    # 1) pull only line number & ship date
+    # 1) Extract just the line number & date columns
     oa = oa_df[['Line No','Ship Date']].copy()
     po = po_df[['Line No','Ship Date']].copy()
     oa['Line No'] = oa['Line No'].apply(normalize_line_number)
     po['Line No'] = po['Line No'].apply(normalize_line_number)
 
-    # 2) merge and filter mismatches
+    # 2) Merge and keep only rows where dates differ
     merged = pd.merge(oa, po, on='Line No', suffixes=('_OA','_PO'))
-    diff = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']]
-    if diff.empty:
+    mismatches = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']]
+    if mismatches.empty:
         return pd.DataFrame()
 
-    # 3) ungrouped: one row per mismatched line
+    # 3) Turn each mismatched line into its own row
     rows = []
-    for _, r in diff.iterrows():
+    for _, r in mismatches.iterrows():
         ln = r['Line No']
         label = f"Line {ln}"
         rows.append({
@@ -60,15 +60,15 @@ def compare_dates(oa_df, po_df):
             'OA Expected Dates':  r['Ship Date_OA'],
             'PO Line Range':      label,
             'PO Requested Dates': r['Ship Date_PO'],
-            '__sort_start':       safe_sort_key(ln)
+            '__sort_key':         safe_sort_key(ln)
         })
 
-    # 4) sort by numeric line, drop helper column
+    # 4) Build DataFrame, sort by line number, drop helper
     df = pd.DataFrame(rows)
     df = (
         df
-        .sort_values(by='__sort_start')
-        .drop(columns='__sort_start')
+        .sort_values(by='__sort_key')
+        .drop(columns='__sort_key')
         .reset_index(drop=True)
     )
     return df
@@ -124,10 +124,10 @@ def compare_oa_po(po_df, oa_df):
     oa_df = combine_duplicate_lines(oa_df)
     po_df = combine_duplicate_lines(po_df)
 
-    # 3) Dates (ungrouped)
+    # 3) Dates — now one line per mismatch
     date_df = compare_dates(oa_df, po_df)
 
-    # 4) Line-by-line, calibration, tags, and order-total logic (unchanged)
+    # 4) Line-by-line, tags, calib, order-total logic (unchanged)
     po_map = {row['Line No']: row for _, row in po_df.iterrows()}
     oa_map = {row['Line No']: row for _, row in oa_df.iterrows()}
     all_lines = sorted(set(po_map) | set(oa_map), key=safe_sort_key)
@@ -198,7 +198,7 @@ def compare_oa_po(po_df, oa_df):
                         )
                     })
 
-    # 5) Order Total
+    # 5) Order Total check (unchanged)
     oa_tot = oa_df[oa_df['Model Number']=='ORDER TOTAL']['Total Price'].values
     po_tot = po_df[po_df['Model Number']=='ORDER TOTAL']['Total Price'].values
     if oa_tot.size and po_tot.size and oa_tot[0] != po_tot[0]:
