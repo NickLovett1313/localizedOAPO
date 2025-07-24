@@ -10,44 +10,43 @@ def compare_oa_po(po_df, oa_df):
     discrepancies = []
     date_discrepancies = []
 
-    # Extract order total for reference
+    # Extract order totals
     oa_total_row = oa_df[oa_df['Model Number'] == 'ORDER TOTAL']
     po_total_row = po_df[po_df['Model Number'] == 'ORDER TOTAL']
     oa_total = oa_total_row['Total Price'].values[0] if not oa_total_row.empty else ''
     po_total = po_total_row['Total Price'].values[0] if not po_total_row.empty else ''
 
-    # Clean for comparison
+    # Prepare main line sets
     po_lines = po_df[po_df['Model Number'] != 'ORDER TOTAL'].copy()
     oa_lines = oa_df[oa_df['Model Number'] != 'ORDER TOTAL'].copy()
     po_lines['Line No'] = po_lines['Line No'].astype(str).str.lstrip('0')
     oa_lines['Line No'] = oa_lines['Line No'].astype(str).str.lstrip('0')
 
-    # Identify tariff charges on both sides
+    # Identify tariff lines
     oa_tariff = oa_lines[oa_lines['Model Number'].str.contains('TARIFF', case=False, na=False)]
     po_tariff = po_lines[po_lines['Model Number'].str.contains('TARIFF', case=False, na=False)]
 
     # ────────────────────────────────────────────
     # 1) Handle TARIFF charges (special logic)
     # ────────────────────────────────────────────
-    tariff_sum = 0.0
+    tariff_mismatch_sum = 0.0
     for _, row in oa_tariff.iterrows():
         price_str = row['Total Price']
         if not price_str:
             continue
-        # accumulate tariff total
         try:
-            price_val = float(price_str.replace(',', ''))
+            val = float(price_str.replace(',', ''))
         except ValueError:
             continue
-        tariff_sum += price_val
 
-        # look for the same numeric charge anywhere in the PO (nomenclature agnostic)
+        # look for the same numeric charge in the PO (any nomenclature)
         found = po_lines[po_lines['Total Price'] == price_str]
         if found.empty:
             discrepancies.append({
                 "Line": "",
                 "Issue": f"OA includes tariff charge ${price_str} but PO does not."
             })
+            tariff_mismatch_sum += val
 
     # ─────────────────────────────
     # 2) Remove tariff lines from main sets
@@ -66,7 +65,7 @@ def compare_oa_po(po_df, oa_df):
             continue
         po_row = po_match.iloc[0]
 
-        # Dates
+        # Date discrepancies
         if oa_row['Ship Date'] and po_row['Ship Date'] and oa_row['Ship Date'] != po_row['Ship Date']:
             date_discrepancies.append({
                 "Line": ln,
@@ -74,7 +73,7 @@ def compare_oa_po(po_df, oa_df):
                 "Factory PO Requested Date": po_row['Ship Date']
             })
 
-        # Model Number
+        # Model mismatch
         if oa_row['Model Number'] and po_row['Model Number'] and oa_row['Model Number'] != po_row['Model Number']:
             diff = diff_chars(oa_row['Model Number'], po_row['Model Number'])
             discrepancies.append({
@@ -82,21 +81,21 @@ def compare_oa_po(po_df, oa_df):
                 "Issue": f"Model Number mismatch → OA: '{oa_row['Model Number']}' vs PO: '{po_row['Model Number']}' | Diff: {diff}"
             })
 
-        # Quantity
+        # Quantity mismatch
         if oa_row['Qty'] and po_row['Qty'] and oa_row['Qty'] != po_row['Qty']:
             discrepancies.append({
                 "Line": ln,
                 "Issue": f"Quantity mismatch → OA: {oa_row['Qty']} vs PO: {po_row['Qty']}"
             })
 
-        # Total Price
+        # Price mismatch
         if oa_row['Total Price'] and po_row['Total Price'] and oa_row['Total Price'] != po_row['Total Price']:
             discrepancies.append({
                 "Line": ln,
                 "Issue": f"Total Price mismatch → OA: {oa_row['Total Price']} vs PO: {po_row['Total Price']}"
             })
 
-        # Tags
+        # Tag logic
         oa_tagged = oa_row['Has Tag?'] == 'Y'
         po_tagged = po_row['Has Tag?'] == 'Y'
         if oa_tagged and not po_tagged:
@@ -109,7 +108,7 @@ def compare_oa_po(po_df, oa_df):
                 "Issue": f"Tag mismatch → OA: {oa_row['Tags']} vs PO: {po_row['Tags']}"
             })
 
-        # Calibration
+        # Calibration logic
         if oa_row['Calib Data?'] == 'Y' and po_row['Calib Data?'] != 'Y':
             discrepancies.append({"Line": ln, "Issue": "OA has calibration data but PO does not."})
         elif po_row['Calib Data?'] == 'Y' and oa_row['Calib Data?'] != 'Y':
@@ -129,7 +128,7 @@ def compare_oa_po(po_df, oa_df):
             discrepancies.append({"Line": ln, "Issue": "Line exists in PO but not in OA."})
 
     # ─────────────────────────────
-    # 5) Final ORDER TOTAL check
+    # 5) Final ORDER TOTAL check (with tariff note)
     # ─────────────────────────────
     if oa_total and po_total:
         try:
@@ -140,12 +139,11 @@ def compare_oa_po(po_df, oa_df):
 
         if oa_val is not None and po_val is not None and oa_val != po_val:
             note = ""
-            if tariff_sum and abs(po_val - oa_val) == tariff_sum:
+            if tariff_mismatch_sum and abs(po_val - oa_val) == tariff_mismatch_sum:
                 note = " *note that the order total is different by exactly the amount of the tariff charge"
             discrepancies.append({
                 "Line": "",
                 "Issue": f"ORDER TOTAL mismatch → OA: {oa_total} vs PO: {po_total}{note}"
             })
 
-    # Return two DataFrames: (general discrepancies, date discrepancies)
     return pd.DataFrame(discrepancies), pd.DataFrame(date_discrepancies)
