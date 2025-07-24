@@ -51,22 +51,23 @@ if po_file and oa_file and po_df is not None and oa_df is not None:
         try:
             disc_df, date_df = compare_oa_po(po_df, oa_df)
 
-            # Summary
             if disc_df.empty and date_df.empty:
                 st.success("I have reviewed the OA and Factory PO for this order and found no discrepancies. Everything else looked good.")
             else:
                 st.warning("I have reviewed the OA and Factory PO for this order and found the following discrepancies. Everything else (that didn't appear in the list) looked good.")
 
-            # Date Table
+            # ✅ Date Discrepancies Table
             if not date_df.empty:
                 st.subheader("📅 Date Discrepancies Found:")
-                st.dataframe(date_df, use_container_width=True)
+                st.dataframe(
+                    date_df[['Line', 'OA Expected Dates', 'PO Requested Dates']].sort_values(by='Line', key=lambda x: x.astype(int)),
+                    use_container_width=True
+                )
 
             # Main Discrepancies
             if not disc_df.empty:
                 st.subheader("📋 Main Discrepancies Found:")
                 st.dataframe(disc_df, use_container_width=True)
-
                 csv = disc_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Download Discrepancy Report CSV",
