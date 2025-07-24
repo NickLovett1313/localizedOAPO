@@ -96,12 +96,13 @@ def get_date_discrepancies(oa_df, po_df):
     merged = pd.merge(oa_dates, po_dates, on='Line No', how='inner', suffixes=('_OA', '_PO'))
 
     mismatches = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']].copy()
-    mismatches['Diff'] = mismatches.apply(
+    mismatches['Difference'] = mismatches.apply(
         lambda row: compute_date_diff(row['Ship Date_OA'], row['Ship Date_PO']), axis=1
     )
-
     mismatches['Line No'] = mismatches['Line No'].apply(safe_sort_key)
     mismatches = mismatches.sort_values(by='Line No')
+
+    return mismatches[['Line No', 'Ship Date_OA', 'Ship Date_PO', 'Difference']]
 
     results = []
     for _, row in mismatches.iterrows():
