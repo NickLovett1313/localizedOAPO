@@ -50,13 +50,12 @@ def compare_dates(oa_df, po_df):
     issues = []
     for _, row in diff.iterrows():
         issues.append({
-            'OA Line Range': f"Line {row['Line No']}",
+            'Line': f"{row['Line No']}",
             'OA Expected Dates': row['Ship Date_OA'],
-            'PO Line Range': f"Line {row['Line No']}",
             'PO Requested Dates': row['Ship Date_PO']
         })
 
-    issues.sort(key=lambda x: int(re.search(r'\d+', x['OA Line Range']).group()))
+    issues.sort(key=lambda x: int(x['Line']) if x['Line'].isdigit() else float('inf'))
     return pd.DataFrame(issues)
 
 def highlight_diff(a, b):
