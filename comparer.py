@@ -38,26 +38,27 @@ def combine_duplicate_lines(df):
     }).reset_index()
 
 def compare_dates(oa_df, po_df):
-    oa = oa_df[['Line No','Ship Date']].copy()
-    po = po_df[['Line No','Ship Date']].copy()
+    oa = oa_df[['Line No', 'Ship Date']].copy()
+    po = po_df[['Line No', 'Ship Date']].copy()
     oa['Line No'] = oa['Line No'].apply(normalize_line_number)
     po['Line No'] = po['Line No'].apply(normalize_line_number)
+    
     merged = pd.merge(oa, po, on='Line No', suffixes=('_OA','_PO'))
     diff = merged[merged['Ship Date_OA'] != merged['Ship Date_PO']]
     if diff.empty:
         return pd.DataFrame()
 
     issues = []
-    for (d_oa, d_po), grp in diff.groupby(['Ship Date_OA','Ship Date_PO']):
+    for (d_oa, d_po), grp in diff.groupby(['Ship Date_OA', 'Ship Date_PO']):
         nums = sorted(int(n) for n in grp['Line No'] if n.isdigit())
         if not nums:
             continue
-        rng = f"Line {nums[0]}" if len(nums)==1 else f"Lines {nums[0]}–{nums[-1]}"
+        rng = f"Line {nums[0]}" if len(nums) == 1 else f"Lines {nums[0]}–{nums[-1]}"
         issues.append({
-            'Lines':             rng,
+            'Lines': f"OA {rng} / PO {rng}",
             'OA Expected Dates': d_oa,
             'PO Requested Dates': d_po,
-            'SortKey':           nums[0]
+            'SortKey': nums[0]
         })
 
     df = pd.DataFrame(issues)
