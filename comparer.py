@@ -37,31 +37,6 @@ def combine_duplicate_lines(df):
         'Calib Details': lambda x: ', '.join(sorted(set(', '.join(x).split(', '))))
     }).reset_index()
 
-def format_date_diff(d1, d2):
-    try:
-        date1 = datetime.strptime(d1, "%d-%b-%Y")
-        date2 = datetime.strptime(d2, "%d-%b-%Y")
-    except:
-        return "Unknown"
-
-    delta = abs((date1 - date2).days)
-    if delta < 7:
-        return "<1 week"
-    elif delta < 14:
-        return "1 week"
-    elif delta < 21:
-        return "2 weeks"
-    elif delta < 28:
-        return "3 weeks"
-    elif delta < 40:
-        return "4 weeks"
-    elif delta < 365:
-        months = round(delta / 30)
-        return f"{months} month{'s' if months > 1 else ''}"
-    else:
-        years = round(delta / 365)
-        return f"{years} year{'s' if years > 1 else ''}"
-
 def compare_dates(oa_df, po_df):
     oa = oa_df[['Line No', 'Ship Date']].copy()
     po = po_df[['Line No', 'Ship Date']].copy()
@@ -75,12 +50,36 @@ def compare_dates(oa_df, po_df):
     if diff.empty:
         return "No Discrepancies Found based on the documents uploaded.", pd.DataFrame()
 
+    def format_date_diff(d1, d2):
+        try:
+            date1 = datetime.strptime(d1, "%d-%b-%Y")
+            date2 = datetime.strptime(d2, "%d-%b-%Y")
+        except:
+            return "Unknown"
+        delta = abs((date1 - date2).days)
+        if delta < 7:
+            return "<1 week"
+        elif delta < 14:
+            return "1 week"
+        elif delta < 21:
+            return "2 weeks"
+        elif delta < 28:
+            return "3 weeks"
+        elif delta < 40:
+            return "4 weeks"
+        elif delta < 365:
+            months = round(delta / 30)
+            return f"{months} month{'s' if months > 1 else ''}"
+        else:
+            years = round(delta / 365)
+            return f"{years} year{'s' if years > 1 else ''}"
+
     diff['Difference'] = diff.apply(
         lambda row: format_date_diff(row['Ship Date_OA'], row['Ship Date_PO']),
         axis=1
     )
 
-    diff = diff.sort_values(by=lambda x: x['Line No'].astype(int))
+    diff = diff.sort_values(by=lambda x: int(x['Line No']))
     diff = diff[['Line No', 'Ship Date_OA', 'Ship Date_PO', 'Difference']]
     diff.columns = ['Line No.', 'OA Expected Date', 'PO Requested Date', 'Difference']
     return "Discrepancies Found!", diff
