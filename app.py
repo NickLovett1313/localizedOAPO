@@ -49,18 +49,19 @@ if po_file and oa_file and po_df is not None and oa_df is not None:
 
     if st.button("🔍 Ready to Compare"):
         try:
-            disc_df, date_df = compare_oa_po(po_df, oa_df)
+            # ✅ CHANGED: use correct variable name from compare_oa_po()
+            disc_df, date_discrepancies = compare_oa_po(po_df, oa_df)
 
             # Summary
-            if disc_df.empty and date_df.empty:
+            if disc_df.empty and not date_discrepancies:
                 st.success("I have reviewed the OA and Factory PO for this order and found no discrepancies. Everything else looked good.")
             else:
                 st.warning("I have reviewed the OA and Factory PO for this order and found the following discrepancies. Everything else (that didn't appear in the list) looked good.")
 
-            # Date Discrepancy Section
-            if date_df:  # it's now a list of strings
+            # ✅ UPDATED: show date discrepancies list
+            if date_discrepancies:
                 st.subheader("📅 Date Discrepancies Found:")
-                for i, entry in enumerate(date_df, 1):
+                for i, entry in enumerate(date_discrepancies, 1):
                     st.markdown(f"**{i}.** {entry}")
             else:
                 st.markdown("*No date discrepancies found.*")
