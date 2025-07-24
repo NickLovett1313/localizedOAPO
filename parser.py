@@ -447,5 +447,9 @@ def parse_oa(file):
         ignore_index=True
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
+
+    # —— DROP the Wire-on Tag column —— 
+    df = df.drop(columns=['Wire-on Tag'], errors=False)
+
     return df
 
