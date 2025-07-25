@@ -258,7 +258,7 @@ def parse_oa(file):
         if m2:
             qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-        # ✅ NEW TAG LOGIC: Grab tags directly under WIRE, up to Qty
+        # ✅ Final tag logic — supports IC tags above WIRE:
         tags = []
         wire_on_tags = []
         qty_int = int(qty) if qty.isdigit() else 1
@@ -267,7 +267,9 @@ def parse_oa(file):
             if re.match(r'^WIRE\s*[:\s]*$', ln, re.IGNORECASE):
                 wire_idx = idx
                 break
+
         if wire_idx is not None:
+            # Step 1: Below WIRE (Qty tags max)
             tag_candidates = lines_clean[wire_idx+1:]
             for line in tag_candidates:
                 tag_candidate = line.strip().upper()
@@ -276,11 +278,23 @@ def parse_oa(file):
                     wire_on_tags.append(tag_candidate)
                 if len(tags) >= qty_int:
                     break
+
+            # Step 2: Above WIRE (catch compound tags like TAG / IC0087-NC)
+            above_candidates = lines_clean[max(0, wire_idx-3):wire_idx]
+            for line in above_candidates:
+                line = line.strip().upper()
+                if '/' in line and 'IC' in line:
+                    parts = re.split(r'\s*/\s*', line)
+                    for p in parts:
+                        if re.fullmatch(r'[A-Z0-9\-_]{5,}', p):
+                            tags.append(p)
+                            wire_on_tags.append(p)
+
         tags = list(dict.fromkeys(tags))
         wire_on_tags = list(dict.fromkeys(wire_on_tags))
         has_tag = 'Y' if tags else 'N'
 
-        # 🧪 Calibration detection (unchanged)
+        # 🧪 Calibration section
         calib_parts  = []
         wire_configs = []
         for idx3, ln3 in enumerate(lines_clean):
