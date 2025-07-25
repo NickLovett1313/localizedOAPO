@@ -22,13 +22,13 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # robust block splitter
+    # block splitter
     lines = text.split('\n')
     blocks = []
     current_block = []
     for line in lines:
         line = line.strip()
-        if re.match(r'^0*\d{4,5}\b', line):  # Start of new PO line
+        if re.match(r'^0*\d{4,5}\b', line):  # PO line start
             if current_block:
                 blocks.append(current_block)
             current_block = [line]
@@ -63,21 +63,16 @@ def parse_po(file):
             if m:
                 qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-            # ✅ Tag extraction fix: now catches full "Tag(s) Serial Number(s)" lines
+            # ✅ NEW TAG LOGIC (robust, works post-line 90)
             tags = []
             wire_tags = []
             for i, line in enumerate(block_lines_clean):
-                if "tag" in line.lower():  # <-- FIXED HERE
-                    for j in range(i+1, min(i+4, len(block_lines_clean))):
-                        candidate = block_lines_clean[j].strip().upper()
-                        if '/' in candidate and 'IC' in candidate:
-                            compound_tag = re.sub(r'\s*/\s*', '/', candidate)
-                            if re.fullmatch(r'[A-Z0-9\-_]+/[A-Z0-9\-_]+(-NC)?', compound_tag):
-                                tags.append(compound_tag)
-                                wire_tags.append(compound_tag)
-                        elif re.fullmatch(r'[A-Z0-9\-_]{5,}', candidate):
-                            tags.append(candidate)
-                            wire_tags.append(candidate)
+                if "tag" in line.lower() and "serial" in line.lower():
+                    if i + 1 < len(block_lines_clean):
+                        possible_tag = block_lines_clean[i+1].strip().upper()
+                        if re.match(r'\b[A-Z0-9\-_/]{5,}\b', possible_tag):
+                            tags.append(possible_tag)
+                            wire_tags.append(possible_tag)
                     break
 
             tags = [t for t in tags if t.upper() != "N/A"]
@@ -180,6 +175,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
     
 import pdfplumber
