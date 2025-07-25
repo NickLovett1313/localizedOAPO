@@ -63,19 +63,27 @@ def parse_po(file):
             if m:
                 qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-            # ✅ NEW TAG LOGIC (robust, works post-line 90)
+            # ✅ STRICT TAG LOGIC (filters out range/unit junk)
             tags = []
             wire_tags = []
+
+            def is_valid_tag(tag):
+                if len(tag) < 5: return False
+                if any(x in tag.lower() for x in [' to ', 'psig', 'bar', 'deg', 'kpa']):
+                    return False
+                if not re.search(r'[A-Z]', tag): return False
+                if not re.search(r'\d', tag): return False
+                return re.fullmatch(r'[A-Z0-9\-_/]+', tag) is not None
+
             for i, line in enumerate(block_lines_clean):
                 if "tag" in line.lower() and "serial" in line.lower():
                     if i + 1 < len(block_lines_clean):
-                        possible_tag = block_lines_clean[i+1].strip().upper()
-                        if re.match(r'\b[A-Z0-9\-_/]{5,}\b', possible_tag):
-                            tags.append(possible_tag)
-                            wire_tags.append(possible_tag)
+                        candidate = block_lines_clean[i+1].strip().upper()
+                        if is_valid_tag(candidate):
+                            tags.append(candidate)
+                            wire_tags.append(candidate)
                     break
 
-            tags = [t for t in tags if t.upper() != "N/A"]
             tags = list(dict.fromkeys(tags))
             wire_tags = list(dict.fromkeys(wire_tags))
             has_tag = 'Y' if tags else 'N'
