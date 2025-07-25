@@ -22,7 +22,7 @@ def parse_po(file):
     elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # ✅ New robust line block splitter
+    # robust block splitter
     lines = text.split('\n')
     blocks = []
     current_block = []
@@ -40,8 +40,9 @@ def parse_po(file):
     for block_lines in blocks:
         try:
             block = "\n".join(block_lines)
+            block_lines_clean = [ln.strip() for ln in block_lines if ln.strip()]
 
-            raw_ln = block_lines[0].strip().split()[0]
+            raw_ln = block_lines_clean[0].split()[0]
             if not raw_ln.isdigit():
                 continue
             ln = int(raw_ln)
@@ -62,41 +63,31 @@ def parse_po(file):
             if m:
                 qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-            # TAG section (unchanged)
-            tag_section = ""
-            tag_hdr     = re.search(r'\bTag(?:s)?\b', block, re.IGNORECASE)
-            sold_to     = re.search(r'\bSold To\b', block, re.IGNORECASE)
-            if tag_hdr:
-                start = tag_hdr.end()
-                end   = sold_to.start() if sold_to else len(block)
-                tag_section = block[start:end]
-
-            slash_comps = []
-            for raw in re.findall(r'\b[A-Z0-9\-_]+\s*/\s*[A-Z0-9\-]+(?:-NC)?\b', tag_section, re.IGNORECASE):
-                slash_comps.append(re.sub(r'\s*/\s*', '/', raw.upper()))
-
-            comp_parts = {p for comp in slash_comps for p in comp.split('/',1)}
-
-            tags = slash_comps.copy()
-            for raw in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_section):
-                norm = raw.upper()
-                if norm in comp_parts:
-                    continue
-                is_date       = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm))
-                is_all_digits = bool(re.fullmatch(r'[\d\-]+', norm))
-                has_letter    = bool(re.search(r'[A-Z]', norm))
-                has_digit     = bool(re.search(r'\d', norm))
-                if has_letter and has_digit and not is_date and not is_all_digits:
-                    tags.append(norm)
+            # ✅ Tag extraction fix: robust beyond line 90
+            tags = []
+            wire_tags = []
+            for i, line in enumerate(block_lines_clean):
+                if re.search(r'\bTag\(s\)\b', line, re.IGNORECASE):
+                    for j in range(i+1, min(i+4, len(block_lines_clean))):
+                        candidate = block_lines_clean[j].strip().upper()
+                        if '/' in candidate and 'IC' in candidate:
+                            compound_tag = re.sub(r'\s*/\s*', '/', candidate)
+                            if re.fullmatch(r'[A-Z0-9\-_]+/[A-Z0-9\-_]+(-NC)?', compound_tag):
+                                tags.append(compound_tag)
+                                wire_tags.append(compound_tag)
+                        elif re.fullmatch(r'[A-Z0-9\-_]{5,}', candidate):
+                            tags.append(candidate)
+                            wire_tags.append(candidate)
+                    break
 
             tags = [t for t in tags if t.upper() != "N/A"]
             tags = list(dict.fromkeys(tags))
+            wire_tags = list(dict.fromkeys(wire_tags))
             has_tag = 'Y' if tags else 'N'
 
-            # ── CALIBRATION SECTION – BELOW "ADDITIONAL INFORMATION"
+            # CALIBRATION SECTION – BELOW "ADDITIONAL INFORMATION"
             calib_parts  = []
             wire_configs = []
-            block_lines_clean = [ln.strip() for ln in block.split('\n') if ln.strip()]
 
             add_idx = next(
                 (idx for idx, ln in enumerate(block_lines_clean)
@@ -113,10 +104,9 @@ def parse_po(file):
                     wm = re.search(r'(\d)-wire\s*RTD', ln_text, re.IGNORECASE)
                     if wm:
                         wire_configs.append(f"{wm.group(1)}-wire RTD")
-
                     for mrange in re.finditer(
-                            r'(-?\d+(?:\.\d+)?)\s*to\s*(-?\d+(?:\.\d+)?)(?:\s*([A-Za-z°\sCFK%/]+))?',
-                            ln_text):
+                        r'(-?\d+(?:\.\d+)?)\s*to\s*(-?\d+(?:\.\d+)?)(?:\s*([A-Za-z°\sCFK%/]+))?',
+                        ln_text):
                         start, end, unit_same = mrange.group(1), mrange.group(2), mrange.group(3)
                         unit = unit_same.strip() if unit_same else ""
                         if not unit and idx_line+1 < len(block_lines_clean):
@@ -151,12 +141,13 @@ def parse_po(file):
                 'Total Price':   total_price,
                 'Has Tag?':      has_tag,
                 'Tags':          ", ".join(tags),
-                'Wire-on Tag':   "",
+                'Wire-on Tag':   ", ".join(wire_tags),
                 'Calib Data?':   calib_data,
                 'Calib Details': calib_details
             })
+
         except Exception as e:
-            print(f"⚠️ Error parsing block {ln}: {e}")
+            print(f"⚠️ Error in block {block_lines_clean[0]}: {e}")
             continue
 
     df = pd.DataFrame(data)
@@ -189,6 +180,10 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+    
+import pdfplumber
+import pandas as pd
+import re
 
 def parse_oa(file):
     data = []
