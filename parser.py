@@ -67,7 +67,7 @@ def parse_po(file):
             tags = []
             wire_tags = []
             for i, line in enumerate(block_lines_clean):
-                if re.search(r'\bTag\(s\)\b', line, re.IGNORECASE):
+                if re.search(r'\bTags?\b', line, re.IGNORECASE):  # FIXED HERE
                     for j in range(i+1, min(i+4, len(block_lines_clean))):
                         candidate = block_lines_clean[j].strip().upper()
                         if '/' in candidate and 'IC' in candidate:
@@ -180,6 +180,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
     
 import pdfplumber
 import pandas as pd
