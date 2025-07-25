@@ -63,37 +63,19 @@ def parse_po(file):
             if m:
                 qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-            # ✅ Tag Logic: primary and fallback
+            # ✅ NEW TAG LOGIC (robust, works post-line 90)
             tags = []
             wire_tags = []
-
-            def is_valid_tag(tag):
-                tag = tag.strip().lower()
-                if len(tag) < 5: return False
-                if any(bad in tag for bad in ['range', ' to ', 'psig', 'kpa', 'bar', 'deg']):
-                    return False
-                if not re.search(r'[A-Z]', tag, re.IGNORECASE): return False
-                if not re.search(r'\d', tag): return False
-                return re.fullmatch(r'[A-Z0-9\-_\/]+', tag, re.IGNORECASE) is not None
-
-            # Primary method — grab line after "Tag(s) Serial..."
             for i, line in enumerate(block_lines_clean):
                 if "tag" in line.lower() and "serial" in line.lower():
                     if i + 1 < len(block_lines_clean):
-                        candidate = block_lines_clean[i+1].strip().upper()
-                        if is_valid_tag(candidate):
-                            tags.append(candidate)
-                            wire_tags.append(candidate)
+                        possible_tag = block_lines_clean[i+1].strip().upper()
+                        if re.match(r'\b[A-Z0-9\-_/]{5,}\b', possible_tag):
+                            tags.append(possible_tag)
+                            wire_tags.append(possible_tag)
                     break
 
-            # Fallback — scan whole block
-            if not tags:
-                joined_block = "\n".join(block_lines_clean)
-                raw_candidates = re.findall(r'\b[A-Z0-9\-_\/]{5,}\b', joined_block.upper())
-                filtered_tags = [c for c in raw_candidates if is_valid_tag(c)]
-                tags.extend(filtered_tags)
-                wire_tags.extend(filtered_tags)
-
+            tags = [t for t in tags if t.upper() != "N/A"]
             tags = list(dict.fromkeys(tags))
             wire_tags = list(dict.fromkeys(wire_tags))
             has_tag = 'Y' if tags else 'N'
@@ -193,7 +175,6 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
-
 
     
 import pdfplumber
