@@ -63,17 +63,18 @@ def parse_po(file):
             if m:
                 qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-            # ✅ STRICT TAG LOGIC (filters out range/unit junk)
+            # ✅ Final Tag Logic with Range/Unit Filter
             tags = []
             wire_tags = []
 
             def is_valid_tag(tag):
+                tag = tag.strip().lower()
                 if len(tag) < 5: return False
-                if any(x in tag.lower() for x in [' to ', 'psig', 'bar', 'deg', 'kpa']):
+                if any(bad in tag for bad in ['range', ' to ', 'psig', 'kpa', 'bar', 'deg']):
                     return False
-                if not re.search(r'[A-Z]', tag): return False
+                if not re.search(r'[A-Z]', tag, re.IGNORECASE): return False
                 if not re.search(r'\d', tag): return False
-                return re.fullmatch(r'[A-Z0-9\-_/]+', tag) is not None
+                return re.fullmatch(r'[A-Z0-9\-_\/]+', tag, re.IGNORECASE) is not None
 
             for i, line in enumerate(block_lines_clean):
                 if "tag" in line.lower() and "serial" in line.lower():
@@ -183,7 +184,6 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
-
 
     
 import pdfplumber
