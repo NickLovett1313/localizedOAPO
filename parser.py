@@ -258,43 +258,49 @@ def parse_oa(file):
         if m2:
             qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-        # ✅ Final tag logic with compound tag support
+        # ✅ Final universal tag logic: supports NAME, WIRE, PERM and fallback
         tags = []
         wire_on_tags = []
         qty_int = int(qty) if qty.isdigit() else 1
-        wire_idx = None
 
-        for idx, ln in enumerate(lines_clean):
-            if re.match(r'^WIRE\s*[:\s]*$', ln, re.IGNORECASE):
-                wire_idx = idx
-                break
-
-        if wire_idx is not None:
-            # Step 1: Below WIRE — up to Qty valid tags
-            tag_candidates = lines_clean[wire_idx+1:]
-            for line in tag_candidates:
-                tag_candidate = line.strip().upper()
-                if re.fullmatch(r'[A-Z0-9\-_]{5,}', tag_candidate):
-                    tags.append(tag_candidate)
-                    wire_on_tags.append(tag_candidate)
-                if len(tags) >= qty_int:
+        # Step 1: Look for a label line (NAME, WIRE, PERM), grab the next line
+        for i in range(len(lines_clean) - 1):
+            label = lines_clean[i].strip().upper()
+            candidate = lines_clean[i+1].strip().upper()
+            if re.match(r'^(NAME|WIRE|PERM)\s*[:\s]*$', label):
+                if '/' in candidate and 'IC' in candidate:
+                    compound = re.sub(r'\s*/\s*', '/', candidate)
+                    if re.fullmatch(r'[A-Z0-9\-_]+/[A-Z0-9\-_]+(-NC)?', compound):
+                        tags.append(compound)
+                        wire_on_tags.append(compound)
+                        break
+                elif re.fullmatch(r'[A-Z0-9\-_]{5,}', candidate):
+                    tags.append(candidate)
+                    wire_on_tags.append(candidate)
                     break
 
-            # Step 2: Above WIRE — capture full compound tag lines like X / ICxxx-NC
-            above_candidates = lines_clean[max(0, wire_idx-3):wire_idx]
-            for line in above_candidates:
-                line = line.strip().upper()
-                if '/' in line and 'IC' in line:
-                    compound_tag = re.sub(r'\s*/\s*', '/', line)
-                    if re.fullmatch(r'[A-Z0-9\-_]+/[A-Z0-9\-_]+(-NC)?', compound_tag):
-                        tags.append(compound_tag)
-                        wire_on_tags.append(compound_tag)
+        # Step 2: If nothing found, fallback to lines below WIRE:
+        if not tags:
+            wire_idx = None
+            for idx, ln in enumerate(lines_clean):
+                if re.match(r'^WIRE\s*[:\s]*$', ln, re.IGNORECASE):
+                    wire_idx = idx
+                    break
+            if wire_idx is not None:
+                tag_candidates = lines_clean[wire_idx+1:]
+                for line in tag_candidates:
+                    tag_candidate = line.strip().upper()
+                    if re.fullmatch(r'[A-Z0-9\-_]{5,}', tag_candidate):
+                        tags.append(tag_candidate)
+                        wire_on_tags.append(tag_candidate)
+                    if len(tags) >= qty_int:
+                        break
 
         tags = list(dict.fromkeys(tags))
         wire_on_tags = list(dict.fromkeys(wire_on_tags))
         has_tag = 'Y' if tags else 'N'
 
-        # 🔬 Calibration extraction (unchanged)
+        # 🔬 Calibration logic
         calib_parts  = []
         wire_configs = []
         for idx3, ln3 in enumerate(lines_clean):
