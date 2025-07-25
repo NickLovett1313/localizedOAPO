@@ -9,183 +9,133 @@ def parse_po(file):
     with pdfplumber.open(file) as pdf:
         text = "\n".join(p.extract_text() or "" for p in pdf.pages)
 
-    # extract order total
+    # Extract order total if present
     stop_match = re.search(r'Order total.*?\$?USD.*?([\d,]+\.\d{2})', text, re.IGNORECASE)
     if stop_match:
         order_total = stop_match.group(1).strip()
-
-    # truncate after GST or order total marker
-    gst_match = re.search(r'SPARTAN.*?GST#.*', text, re.IGNORECASE)
-    if gst_match:
-        pos = text.lower().find(gst_match.group(0).lower()) + len(gst_match.group(0))
-        text = text[:pos]
-    elif stop_match:
         text = text.split(stop_match.group(0))[0]
 
-    # split into line‐item blocks by PO line number
-    blocks = re.split(r'\n(0*\d{4,5})', text)
+    # Robust line-by-line parsing
+    lines = text.split('\n')
+    current_block = []
+    blocks = []
 
-    for i in range(1, len(blocks) - 1, 2):
-        raw_ln = blocks[i].strip()
-        block  = blocks[i + 1]
-        if not raw_ln.isdigit():
-            continue
-        ln = int(raw_ln)
-        if ln <= 0:
-            continue
+    for line in lines:
+        line = line.strip()
+        if re.match(r'^\d{5}\b', line):  # new PO line start
+            if current_block:
+                blocks.append(current_block)
+            current_block = [line]
+        elif current_block:
+            current_block.append(line)
+    if current_block:
+        blocks.append(current_block)
 
-        # Model Number
-        model_m   = re.search(r'([A-Z0-9\-_]{6,})', block)
-        model_str = model_m.group(1) if model_m else ''
+    for block in blocks:
+        try:
+            block_text = "\n".join(block)
 
-        # Ship Date
-        ship_date_m = re.search(r'([A-Za-z]{3} \d{1,2}, \d{4})', block)
-        ship_date   = ship_date_m.group(1) if ship_date_m else ''
-
-        # Qty / Unit Price / Total Price
-        qty = unit_price = total_price = ""
-        m = re.search(r'(\d+)\s+EA\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
-        if m:
-            qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
-
-        # TAG section (unchanged)
-        tag_section = ""
-        tag_hdr     = re.search(r'\bTag(?:s)?\b', block, re.IGNORECASE)
-        sold_to     = re.search(r'\bSold To\b', block, re.IGNORECASE)
-        if tag_hdr:
-            start = tag_hdr.end()
-            end   = sold_to.start() if sold_to else len(block)
-            tag_section = block[start:end]
-
-        slash_comps = []
-        for raw in re.findall(r'\b[A-Z0-9\-_]+\s*/\s*[A-Z0-9\-]+(?:-NC)?\b', tag_section, re.IGNORECASE):
-            slash_comps.append(re.sub(r'\s*/\s*', '/', raw.upper()))
-
-        comp_parts = {p for comp in slash_comps for p in comp.split('/',1)}
-
-        tags = slash_comps.copy()
-        for raw in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', tag_section):
-            norm = raw.upper()
-            if norm in comp_parts:
+            # Line No
+            line_m = re.match(r'^0*(\d{1,5})\b', block[0])
+            if not line_m:
                 continue
-            is_date       = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', norm))
-            is_all_digits = bool(re.fullmatch(r'[\d\-]+', norm))
-            has_letter    = bool(re.search(r'[A-Z]', norm))
-            has_digit     = bool(re.search(r'\d', norm))
-            if has_letter and has_digit and not is_date and not is_all_digits:
-                tags.append(norm)
+            line_no = line_m.group(1)
 
-        # —— NEW: filter out any "N/A" tags —— 
-        tags = [t for t in tags if t.upper() != "N/A"]
+            # Model Number
+            model_m = re.search(r'\b([A-Z0-9\-_]{6,})\b', block[0])
+            model = model_m.group(1) if model_m else ''
 
-        tags    = list(dict.fromkeys(tags))
-        has_tag = 'Y' if tags else 'N'
+            # Qty / Unit Price / Total Price
+            qty = unit_price = total_price = ""
+            m = re.search(r'(\d+)\s+EA\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block_text)
+            if m:
+                qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-        # ── CALIBRATION SECTION – BELOW "ADDITIONAL INFORMATION" ──
-        calib_parts  = []
-        wire_configs = []
-        block_lines  = [ln.strip() for ln in block.split('\n') if ln.strip()]
+            # Ship Date
+            ship_date = ""
+            ship_m = re.search(r'Requested Ship Date\s*[:\-]?\s*([A-Za-z]{3} \d{1,2}, \d{4})', block_text)
+            if ship_m:
+                ship_date = ship_m.group(1)
 
-        # locate Additional Information
-        add_idx = next(
-            (idx for idx, ln in enumerate(block_lines)
-             if re.search(r'Additional Information', ln, re.IGNORECASE)),
-            None
-        )
-        if add_idx is not None:
-            for offset, ln_text in enumerate(block_lines[add_idx+1:]):
-                idx_line = add_idx + 1 + offset
+            # Tags
+            tags = []
+            has_tag = 'N'
+            wire_tags = []
 
-                # stop at next section
-                if re.search(r'\bTag(?:s)?\b|Sold To|Ship To', ln_text, re.IGNORECASE):
-                    break
-                # skip invalid 2-wire
-                if '2-wire' in ln_text.lower():
-                    continue
+            for i, line in enumerate(block):
+                if 'Tag(s)' in line:
+                    # Pull next line(s) as tags
+                    if i+1 < len(block):
+                        raw_tag_line = block[i+1].strip()
+                        tag_parts = re.split(r'[;/]', raw_tag_line)
+                        for t in tag_parts:
+                            tag = t.strip().upper()
+                            if re.fullmatch(r'[A-Z0-9\-_]{5,}', tag):
+                                tags.append(tag)
+                                wire_tags.append(tag)
 
-                # 1) capture wire-RTD configs
-                wm = re.search(r'(\d)-wire\s*RTD', ln_text, re.IGNORECASE)
-                if wm:
-                    wire_configs.append(f"{wm.group(1)}-wire RTD")
+            tags = list(dict.fromkeys(tags))
+            wire_tags = list(dict.fromkeys(wire_tags))
+            has_tag = 'Y' if tags else 'N'
 
-                # 2) capture numeric ranges + units (same line OR next line)
-                for mrange in re.finditer(
-                        r'(-?\d+(?:\.\d+)?)\s*to\s*(-?\d+(?:\.\d+)?)(?:\s*([A-Za-z°\sCFK%/]+))?',
-                        ln_text):
-                    start, end, unit_same = mrange.group(1), mrange.group(2), mrange.group(3)
-                    unit = unit_same.strip() if unit_same else ""
-                    # if no unit on same line, check next line for unit keywords
-                    if not unit and idx_line+1 < len(block_lines):
-                        um = re.search(
-                            r'(DEG\s*[CFK]?|°[CFK]?|KPA|PSI|BAR|MBAR)',
-                            block_lines[idx_line+1].upper()
-                        )
-                        if um:
-                            unit = um.group(0).strip()
-                    calib_parts.append(f"{start} to {end} {unit}".strip())
+            # Calibration details (unchanged)
+            calib_parts = []
+            wire_configs = []
+            for ln in block:
+                # Range line
+                if re.search(r'-?\d+(\.\d+)?\s*to\s*-?\d+(\.\d+)?', ln):
+                    rng = re.findall(r'-?\d+(\.\d+)?\s*to\s*-?\d+(\.\d+)?(?:\s*([A-Z°\s]+))?', ln)
+                    for m_rng in rng:
+                        unit = m_rng[2].strip().upper() if len(m_rng) > 2 and m_rng[2] else ''
+                        calib_parts.append(f"{m_rng[0]} to {m_rng[1]} {unit}".strip())
+                if 'wire' in ln.lower():
+                    w_match = re.search(r'(\d)-wire', ln, re.IGNORECASE)
+                    if w_match:
+                        wire_configs.append(f"{w_match.group(1)}-wire RTD")
+            if wire_configs:
+                calib_parts = wire_configs + calib_parts
 
-        # if no explicit wire configs but "wire" exists anywhere, capture broadly
-        if not wire_configs and any('WIRE' in ln.upper() for ln in block_lines):
-            for w in re.findall(r'(\d)-wire', "\n".join(block_lines), re.IGNORECASE):
-                cfg = f"{w}-wire RTD"
-                if cfg not in wire_configs:
-                    wire_configs.append(cfg)
+            calib_parts = list(dict.fromkeys(p for p in calib_parts if p))
+            calib_data = 'Y' if calib_parts else ''
+            calib_details = ", ".join(calib_parts)
 
-        # prepend wire configs
-        if wire_configs:
-            calib_parts = wire_configs + calib_parts
+            data.append({
+                'Line No':       line_no,
+                'Model Number':  model,
+                'Ship Date':     ship_date,
+                'Qty':           qty,
+                'Unit Price':    unit_price,
+                'Total Price':   total_price,
+                'Has Tag?':      has_tag,
+                'Tags':          ", ".join(tags),
+                'Wire-on Tag':   ", ".join(wire_tags),
+                'Calib Data?':   calib_data,
+                'Calib Details': calib_details
+            })
 
-        # dedupe and flag
-        calib_parts   = [p for p in calib_parts if p]
-        calib_parts   = list(dict.fromkeys(calib_parts))
-        calib_data    = 'Y' if calib_parts else ''
-        calib_details = ", ".join(calib_parts)
+        except Exception as e:
+            print(f"⚠️ Error parsing block: {e}")
+            continue
 
-        data.append({
-            'Line No':       ln,
-            'Model Number':  model_str,
-            'Ship Date':     ship_date,
-            'Qty':           qty,
-            'Unit Price':    unit_price,
-            'Total Price':   total_price,
-            'Has Tag?':      has_tag,
-            'Tags':          ", ".join(tags),
-            'Wire-on Tag':   "",
-            'Calib Data?':   calib_data,
-            'Calib Details': calib_details
-        })
-
-    # build DataFrame & apply filters
     df = pd.DataFrame(data)
-    df = df[
-        (pd.to_numeric(df['Line No'], errors='coerce') <= 10000) &
-        (df['Qty'].str.strip() != '') &
-        (df['Unit Price'].str.strip() != '') &
-        (df['Total Price'].str.strip() != '')
-    ].copy()
 
-    # append ORDER TOTAL if present
     if order_total:
-        df = pd.concat([
-            df,
-            pd.DataFrame([{
-                'Line No':       '',
-                'Model Number':  'ORDER TOTAL',
-                'Ship Date':     '',
-                'Qty':           '',
-                'Unit Price':    '',
-                'Total Price':   order_total,
-                'Has Tag?':      '',
-                'Tags':          '',
-                'Wire-on Tag':   '',
-                'Calib Data?':   '',
-                'Calib Details': ''
-            }])
-        ], ignore_index=True)
+        df = pd.concat([df, pd.DataFrame([{
+            'Line No':       '',
+            'Model Number':  'ORDER TOTAL',
+            'Ship Date':     '',
+            'Qty':           '',
+            'Unit Price':    '',
+            'Total Price':   order_total,
+            'Has Tag?':      '',
+            'Tags':          '',
+            'Wire-on Tag':   '',
+            'Calib Data?':   '',
+            'Calib Details': ''
+        }])], ignore_index=True)
 
-    # sort and return
-    df_main = df[df['Model Number'] != 'ORDER TOTAL'].copy()
-    df_total= df[df['Model Number'] == 'ORDER TOTAL'].copy()
+    df_main  = df[df['Model Number']!='ORDER TOTAL'].copy()
+    df_total = df[df['Model Number']=='ORDER TOTAL'].copy()
     df_main['Line No'] = pd.to_numeric(df_main['Line No'], errors='coerce')
     df_main = df_main.sort_values(by='Line No', ignore_index=True)
     df = pd.concat([df_main, df_total], ignore_index=True)
