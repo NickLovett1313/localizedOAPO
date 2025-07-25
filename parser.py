@@ -63,7 +63,7 @@ def parse_po(file):
             if m:
                 qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-            # ✅ Final Tag Logic with Range/Unit Filter
+            # ✅ Tag Logic: primary and fallback
             tags = []
             wire_tags = []
 
@@ -76,6 +76,7 @@ def parse_po(file):
                 if not re.search(r'\d', tag): return False
                 return re.fullmatch(r'[A-Z0-9\-_\/]+', tag, re.IGNORECASE) is not None
 
+            # Primary method — grab line after "Tag(s) Serial..."
             for i, line in enumerate(block_lines_clean):
                 if "tag" in line.lower() and "serial" in line.lower():
                     if i + 1 < len(block_lines_clean):
@@ -84,6 +85,14 @@ def parse_po(file):
                             tags.append(candidate)
                             wire_tags.append(candidate)
                     break
+
+            # Fallback — scan whole block
+            if not tags:
+                joined_block = "\n".join(block_lines_clean)
+                raw_candidates = re.findall(r'\b[A-Z0-9\-_\/]{5,}\b', joined_block.upper())
+                filtered_tags = [c for c in raw_candidates if is_valid_tag(c)]
+                tags.extend(filtered_tags)
+                wire_tags.extend(filtered_tags)
 
             tags = list(dict.fromkeys(tags))
             wire_tags = list(dict.fromkeys(wire_tags))
@@ -184,6 +193,7 @@ def parse_po(file):
     df = pd.concat([df_main, df_total], ignore_index=True)
 
     return df
+
 
     
 import pdfplumber
