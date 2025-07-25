@@ -243,8 +243,7 @@ def parse_oa(file):
         if not line_nos:
             continue
 
-        tag_block            = block.replace(cust_po, " ") if cust_po else block
-        lines_clean          = [l.strip() for l in block.split('\n') if l.strip()]
+        lines_clean = [l.strip() for l in block.split('\n') if l.strip()]
 
         model_m   = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
         model     = model_m.group(0) if model_m else ""
@@ -259,51 +258,29 @@ def parse_oa(file):
         if m2:
             qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-        # 🟡 NEW: Extract Tags between NAME: and WIRE:
+        # ✅ NEW TAG LOGIC: Grab tags directly under WIRE, up to Qty
         tags = []
         wire_on_tags = []
-        try:
-            name_idx = next(i for i, ln in enumerate(lines_clean) if re.match(r'^NAME\s*[:\s]*$', ln, re.IGNORECASE))
-            wire_idx = next(i for i, ln in enumerate(lines_clean) if re.match(r'^WIRE\s*[:\s]*$', ln, re.IGNORECASE))
-        except StopIteration:
-            name_idx = wire_idx = None
-
-        if name_idx is not None and wire_idx is not None and name_idx < wire_idx:
-            tag_lines = lines_clean[name_idx + 1:wire_idx]
-            for raw in tag_lines:
-                raw = raw.strip()
-                if '/' in raw:
-                    parts = re.split(r'\s*/\s*', raw)
-                    if len(parts) == 2:
-                        left, right = parts[0].strip().upper(), parts[1].strip().upper()
-                        if re.fullmatch(r'[A-Z0-9\-_]+', left) and re.fullmatch(r'[A-Z0-9\-]+', right):
-                            comp = f"{left}/{right}"
-                            tags.append(comp)
-                            wire_on_tags.append(comp)
-                            continue
-                if re.fullmatch(r'IC\d{2,5}(-NC)?', raw, re.IGNORECASE):
-                    tags.append(raw.upper())
-                    continue
-                if re.fullmatch(r'[A-Z0-9]{2,}-[A-Z0-9\-]{2,}', raw):
-                    tags.append(raw.upper())
-
-        tags = [t for t in tags if not t.endswith('-')]
-        tags = [
-            t for t in tags
-            if not any(t != t2 and t in t2 for t2 in tags)
-        ]
-        tags = [t for t in tags if 'CVE' not in t.upper() and 'TSE' not in t.upper()]
-        if qty.isdigit() and int(qty) == 1:
-            slash_tags = [t for t in tags if '/' in t]
-            if slash_tags:
-                tags = slash_tags
+        qty_int = int(qty) if qty.isdigit() else 1
+        wire_idx = None
+        for idx, ln in enumerate(lines_clean):
+            if re.match(r'^WIRE\s*[:\s]*$', ln, re.IGNORECASE):
+                wire_idx = idx
+                break
+        if wire_idx is not None:
+            tag_candidates = lines_clean[wire_idx+1:]
+            for line in tag_candidates:
+                tag_candidate = line.strip().upper()
+                if re.fullmatch(r'[A-Z0-9\-_]{5,}', tag_candidate):
+                    tags.append(tag_candidate)
+                    wire_on_tags.append(tag_candidate)
+                if len(tags) >= qty_int:
+                    break
         tags = list(dict.fromkeys(tags))
-        if qty.isdigit() and int(qty) > 1:
-            tags = [t for t in tags for _ in range(int(qty))]
         wire_on_tags = list(dict.fromkeys(wire_on_tags))
         has_tag = 'Y' if tags else 'N'
 
-        # 🔁 Calibration parsing (unchanged from your version)
+        # 🧪 Calibration detection (unchanged)
         calib_parts  = []
         wire_configs = []
         for idx3, ln3 in enumerate(lines_clean):
