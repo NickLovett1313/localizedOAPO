@@ -244,144 +244,97 @@ def parse_oa(file):
             continue
 
         tag_block            = block.replace(cust_po, " ") if cust_po else block
-        contains_tag_section = bool(re.search(r'\bTag\b', block, re.IGNORECASE))
         lines_clean          = [l.strip() for l in block.split('\n') if l.strip()]
 
-        for line_no in line_nos:
-            model_m   = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
-            model     = model_m.group(0) if model_m else ""
+        model_m   = re.search(r'\b(?=[A-Z0-9\-_]*[A-Z])[A-Z0-9\-_]{6,}\b', block)
+        model     = model_m.group(0) if model_m else ""
 
-            sd        = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
-            ship_date = sd.group(1) if sd else (
-                          (re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block) or [None, ""])[1]
-                        )
-
-            qty = unit_price = total_price = ""
-            m2  = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
-            if m2:
-                qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
-
-            tags = []
-            skip_ic = set()
-
-            name_tag = None
-            for idx, ln in enumerate(lines_clean):
-                if re.match(r'^NAME\s*[:\s]*$', ln, re.IGNORECASE):
-                    if idx + 1 < len(lines_clean):
-                        cand = lines_clean[idx + 1].strip()
-                        if cand:
-                            name_tag = cand.upper()
-                    break
-            if name_tag:
-                tags.append(name_tag)
-            else:
-                if contains_tag_section:
-                    raw_comps = re.findall(
-                        r'\b[A-Z0-9\-_]+(?:\s*/\s*IC\d{2,5}-NC)\b',
-                        tag_block, re.IGNORECASE
+        sd        = re.search(r'Expected Ship Date:\s*(\d{2}-[A-Za-z]{3}-\d{4})', block)
+        ship_date = sd.group(1) if sd else (
+                      (re.search(r'([A-Za-z]{3}\s+\d{1,2},\s+\d{4})', block) or [None, ""])[1]
                     )
-                    compounds = [re.sub(r'\s*/\s*','/', rc.upper()) for rc in raw_comps]
-                    for comp in compounds:
-                        if cust_po and (comp == cust_po or comp.startswith(cust_po)):
-                            continue
-                        tags.append(comp)
-                        skip_ic.add(comp.split('/',1)[1])
 
-                    temp_block = tag_block
-                    for raw in raw_comps:
-                        temp_block = re.sub(re.escape(raw), ' ', temp_block, flags=re.IGNORECASE)
+        qty = unit_price = total_price = ""
+        m2  = re.search(r'(^|\s)(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})', block)
+        if m2:
+            qty, unit_price, total_price = m2.group(2), m2.group(3), m2.group(4)
 
-                    for t in re.findall(r'\b[A-Z0-9]{2,}-[A-Z0-9\-]{2,}\b', temp_block):
-                        if cust_po and (t == cust_po or t.startswith(cust_po)):
-                            continue
-                        has_letters  = bool(re.search(r'[A-Z]', t))
-                        has_digits   = bool(re.search(r'\d', t))
-                        is_all_digits= bool(re.fullmatch(r'[\d\-]+', t))
-                        is_date      = bool(re.search(r'\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}', t))
-                        ok_len       = 5 <= len(t) <= 50
-                        if has_letters and has_digits and not is_all_digits and not is_date and ok_len:
-                            tags.append(t)
+        # 🟡 NEW: Extract Tags between NAME: and WIRE:
+        tags = []
+        wire_on_tags = []
+        try:
+            name_idx = next(i for i, ln in enumerate(lines_clean) if re.match(r'^NAME\s*[:\s]*$', ln, re.IGNORECASE))
+            wire_idx = next(i for i, ln in enumerate(lines_clean) if re.match(r'^WIRE\s*[:\s]*$', ln, re.IGNORECASE))
+        except StopIteration:
+            name_idx = wire_idx = None
 
-                for ic in set(re.findall(r'\bIC\d{2,5}(?:-NC)?\b', block, re.IGNORECASE)):
-                    icn = ic.upper()
-                    if icn not in skip_ic:
-                        tags.append(icn)
-
-            for idx, ln_text in enumerate(lines_clean):
-                m_split = re.match(
-                    r'^([A-Z0-9\-_]+)\s*/\s*(IC\d{2,5})-$',
-                    ln_text, re.IGNORECASE
-                )
-                if m_split and idx+1 < len(lines_clean) \
-                   and lines_clean[idx+1].strip().upper() == 'NC':
-                    comp = f"{m_split.group(1).upper()}/{m_split.group(2).upper()}-NC"
-                    if comp not in tags:
-                        tags.append(comp)
-
-            for ln_text in lines_clean:
-                if '/' in ln_text and 'NC' not in ln_text.upper():
-                    parts = re.split(r'\s*/\s*', ln_text)
+        if name_idx is not None and wire_idx is not None and name_idx < wire_idx:
+            tag_lines = lines_clean[name_idx + 1:wire_idx]
+            for raw in tag_lines:
+                raw = raw.strip()
+                if '/' in raw:
+                    parts = re.split(r'\s*/\s*', raw)
                     if len(parts) == 2:
                         left, right = parts[0].strip().upper(), parts[1].strip().upper()
-                        if re.fullmatch(r'[A-Z0-9\-_]+', left) and \
-                           re.fullmatch(r'[A-Z0-9\-]+', right):
+                        if re.fullmatch(r'[A-Z0-9\-_]+', left) and re.fullmatch(r'[A-Z0-9\-]+', right):
                             comp = f"{left}/{right}"
-                            if comp not in tags:
-                                tags.append(comp)
+                            tags.append(comp)
+                            wire_on_tags.append(comp)
+                            continue
+                if re.fullmatch(r'IC\d{2,5}(-NC)?', raw, re.IGNORECASE):
+                    tags.append(raw.upper())
+                    continue
+                if re.fullmatch(r'[A-Z0-9]{2,}-[A-Z0-9\-]{2,}', raw):
+                    tags.append(raw.upper())
 
-            tags = [t for t in tags if not t.endswith('-')]
+        tags = [t for t in tags if not t.endswith('-')]
+        tags = [
+            t for t in tags
+            if not any(t != t2 and t in t2 for t2 in tags)
+        ]
+        tags = [t for t in tags if 'CVE' not in t.upper() and 'TSE' not in t.upper()]
+        if qty.isdigit() and int(qty) == 1:
+            slash_tags = [t for t in tags if '/' in t]
+            if slash_tags:
+                tags = slash_tags
+        tags = list(dict.fromkeys(tags))
+        if qty.isdigit() and int(qty) > 1:
+            tags = [t for t in tags for _ in range(int(qty))]
+        wire_on_tags = list(dict.fromkeys(wire_on_tags))
+        has_tag = 'Y' if tags else 'N'
 
-            tags = [
-                t for t in tags
-                if not any(t != t2 and t in t2 for t2 in tags)
-            ]
+        # 🔁 Calibration parsing (unchanged from your version)
+        calib_parts  = []
+        wire_configs = []
+        for idx3, ln3 in enumerate(lines_clean):
+            if re.search(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3):
+                ranges    = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3)
+                unit_clean= ""
+                if idx3+1 < len(lines_clean):
+                    um = re.search(
+                        r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
+                        lines_clean[idx3+1].upper()
+                    )
+                    if um:
+                        unit_clean = um.group(0).strip().upper()
+                if idx3+2 < len(lines_clean) and \
+                   re.fullmatch(r'1[2-5]', lines_clean[idx3+2].strip()):
+                    code = lines_clean[idx3+2].strip()[1]
+                    wire_configs.append(f"{code}-wire RTD")
+                for r in ranges:
+                    calib_parts.append(f"{r} {unit_clean}".strip())
+        if not wire_configs and any('WIRE' in ln.upper() for ln in lines_clean):
+            for w in re.findall(r'\s1([2-5])\s', block):
+                wire_configs.append(f"{w}-wire RTD")
+        wire_configs = list(dict.fromkeys(wire_configs))
+        if wire_configs:
+            calib_parts = wire_configs + calib_parts
+        calib_parts   = [p for p in calib_parts if p]
+        calib_parts   = list(dict.fromkeys(calib_parts))
+        calib_data    = 'Y' if calib_parts else 'N'
+        calib_details = ", ".join(calib_parts)
 
-            # ❌ Remove any tag with CVE or TSE
-            tags = [t for t in tags if 'CVE' not in t.upper() and 'TSE' not in t.upper()]
-
-            if qty.isdigit() and int(qty) == 1:
-                slash_tags = [t for t in tags if '/' in t]
-                if slash_tags:
-                    tags = slash_tags
-
-            tags = list(dict.fromkeys(tags))
-            if qty.isdigit() and int(qty) > 1:
-                tags = [t for t in tags for _ in range(int(qty))]
-
-            wire_on_tags = [t for t in tags if '/' in t]
-            has_tag = 'Y' if tags else 'N'
-
-            calib_parts  = []
-            wire_configs = []
-            for idx3, ln3 in enumerate(lines_clean):
-                if re.search(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3):
-                    ranges    = re.findall(r'-?\d+(?:\.\d+)?\s*to\s*-?\d+(?:\.\d+)?', ln3)
-                    unit_clean= ""
-                    if idx3+1 < len(lines_clean):
-                        um = re.search(
-                            r'(DEG\s*[CFK]?|°C|°F|KPA|PSI|BAR|MBAR)',
-                            lines_clean[idx3+1].upper()
-                        )
-                        if um:
-                            unit_clean = um.group(0).strip().upper()
-                    if idx3+2 < len(lines_clean) and \
-                       re.fullmatch(r'1[2-5]', lines_clean[idx3+2].strip()):
-                        code = lines_clean[idx3+2].strip()[1]
-                        wire_configs.append(f"{code}-wire RTD")
-                    for r in ranges:
-                        calib_parts.append(f"{r} {unit_clean}".strip())
-            if not wire_configs and any('WIRE' in ln.upper() for ln in lines_clean):
-                for w in re.findall(r'\s1([2-5])\s', block):
-                    wire_configs.append(f"{w}-wire RTD")
-            wire_configs = list(dict.fromkeys(wire_configs))
-            if wire_configs:
-                calib_parts = wire_configs + calib_parts
-
-            calib_parts   = [p for p in calib_parts if p]
-            calib_parts   = list(dict.fromkeys(calib_parts))
-            calib_data    = 'Y' if calib_parts else 'N'
-            calib_details = ", ".join(calib_parts)
-
+        for line_no in line_nos:
             data.append({
                 'Line No':       line_no,
                 'Model Number':  model,
@@ -427,4 +380,5 @@ def parse_oa(file):
     )
     df = pd.concat([df_main, df_total], ignore_index=True)
     return df
+
 
