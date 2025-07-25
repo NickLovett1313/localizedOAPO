@@ -63,11 +63,11 @@ def parse_po(file):
             if m:
                 qty, unit_price, total_price = m.group(1), m.group(2), m.group(3)
 
-            # ✅ Tag extraction fix: robust beyond line 90
+            # ✅ Tag extraction fix: now catches full "Tag(s) Serial Number(s)" lines
             tags = []
             wire_tags = []
             for i, line in enumerate(block_lines_clean):
-                if re.search(r'\bTags?\b', line, re.IGNORECASE):  # FIXED HERE
+                if "tag" in line.lower():  # <-- FIXED HERE
                     for j in range(i+1, min(i+4, len(block_lines_clean))):
                         candidate = block_lines_clean[j].strip().upper()
                         if '/' in candidate and 'IC' in candidate:
